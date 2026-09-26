@@ -6,6 +6,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import webview
+from webview.dom import _dnd_state
 import main
 import config
 
@@ -39,12 +40,17 @@ def create_window(*args, **kwargs):
             assert result["glass"]["ready"] is True, result["glass"]
             result["glass_pixel"] = window.evaluate_js("(() => { const canvas = document.querySelector('#liquid-canvas'); const gl = canvas.getContext('webgl2'); const rect = document.querySelector('#sidebar').getBoundingClientRect(); const scale = canvas.width / innerWidth; const pixel = new Uint8Array(4); gl.readPixels(Math.floor((rect.x + rect.width / 2) * scale), Math.floor((innerHeight - rect.y - 30) * scale), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); return [...pixel]; })()")
             assert result["glass_pixel"][3] > 0, "Native glass canvas is blank"
+            until = time.monotonic() + 5
+            while _dnd_state['num_listeners'] == 0 and time.monotonic() < until:
+                time.sleep(.05)
+            result["drop_listeners"] = _dnd_state['num_listeners']
+            assert result["drop_listeners"] > 0, "Native folder drop listener is missing"
             result["passed"] = True
         except Exception as exc:
             result.update(passed=False, error=str(exc))
         finally:
             window.destroy()
-    window.events.loaded += verify
+    window.events.loaded += lambda: threading.Thread(target=verify, daemon=True).start()
     return window
 
 

@@ -49,10 +49,19 @@ def main():
                         api.emit("folder-added", result)
                     except Exception as exc:
                         api.emit("error", {"message": str(exc)})
-        try:
-            window.dom.get_element("#sidebar").events.drop += DOMEventHandler(drop, prevent_default=True)
-        except Exception:
-            pass
+        last_error = None
+        for _ in range(50):
+            try:
+                sidebar = window.dom.get_element("#sidebar")
+                if sidebar is not None:
+                    sidebar.on("drop", DOMEventHandler(drop, prevent_default=True))
+                    break
+            except Exception as exc:
+                last_error = exc
+            time.sleep(.1)
+        else:
+            print(f"Native folder drop setup failed: {last_error or 'sidebar unavailable'}", flush=True)
+            api.emit("error", {"message": f"无法启用文件夹拖放: {last_error or '侧边栏未加载'}"})
         def auto_check():
             time.sleep(5)
             if api.state.get("auto_update", True):
