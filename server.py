@@ -10,7 +10,7 @@ import config
 import thumbs
 import metadata
 
-METHODS = {"bootstrap", "settings", "window_action", "resize_window", "add_folder", "remove_folder", "folders", "open_folder", "page", "clean_cache", "file_action", "check_update", "install_update", "update_progress", "release_history"}
+METHODS = {"bootstrap", "settings", "window_action", "resize_window", "add_folder", "remove_folder", "folders", "open_folder", "page", "clean_cache", "rename", "file_action", "check_update", "install_update", "update_progress", "release_history"}
 
 
 def start(api, port=0):

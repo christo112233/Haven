@@ -85,7 +85,7 @@ button svg { pointer-events: none; }
 svg { width: 18px; height: 18px; stroke-width: 1.7; flex-shrink: 0; }
 .glass, .liquid-surface { background: var(--glass-fallback); background: color-mix(in srgb, var(--glass-fallback) calc(var(--glass-alpha-factor) * 100%), transparent); backdrop-filter: blur(12px) saturate(1.3); -webkit-backdrop-filter: blur(12px) saturate(1.3); border: 1px solid var(--border); box-shadow: inset 0 1px 0 #ffffff60, inset 0 -1px 0 #dbfbff18, 0 8px 22px #00152516; }
 .liquid-ready .liquid-surface { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border-color: #dffaff20; box-shadow: 0 8px 24px #00233912; }
-.liquid-ready #sidebar, .liquid-ready #details, .liquid-ready #toast, .liquid-ready #folder-path, .liquid-ready #context-menu { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.liquid-ready #sidebar, .liquid-ready #toast, .liquid-ready #folder-path { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 :root[data-theme="light"] .glass, :root[data-theme="light"] .liquid-surface { box-shadow: inset 0 1px 0 #ffffffb8, inset 0 -1px 0 #7ea9bd1f, 0 8px 22px #33556b1a; }
 .icon-button { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; }
 .icon-button:hover { transform: translateY(-2px) scale(1.07); box-shadow: 0 8px 24px #03253524; }
@@ -228,7 +228,8 @@ progress { width: 100px; height: 4px; border: 0; border-radius: 4px; appearance:
 progress::-webkit-progress-bar { background: #d3f6ff26; }
 progress::-webkit-progress-value { background: #c7faff; box-shadow: 0 0 8px #b5faff60; transition: width .4s; }
 dialog { color: var(--text); border: 1px solid var(--border-strong); border-radius: 26px; background: var(--panel-fill); backdrop-filter: blur(18px); padding: 0; box-shadow: 0 25px 90px #001b4260,inset 0 1px 0 #ffffff5c; overflow: hidden; }
-dialog::backdrop { background: #03182b4a; backdrop-filter: blur(7px); animation: backdrop-enter .35s ease both; }
+dialog::backdrop { background: rgba(4, 20, 32, .24); backdrop-filter: blur(16px) saturate(1.08); -webkit-backdrop-filter: blur(16px) saturate(1.08); animation: backdrop-enter .35s ease both; }
+:root[data-theme="light"] dialog::backdrop { background: rgba(218, 235, 244, .32); }
 .modal-liquid-canvas { z-index: 0; }
 #viewer .modal-liquid-canvas { z-index: 2; }
 dialog > :where(:not(.liquid-canvas):not(#glass-cursor)) { position: relative; z-index: 1; }
@@ -248,6 +249,8 @@ h2 { font-size: 20px; font-weight: 500; margin: 0; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; margin-top: 26px; }
 #folder-path { width: 100%; padding: 13px 17px; border: 1px solid var(--border-strong); border-radius: 22px; background: var(--glass-fill); color: var(--text); }
 #folder-path::placeholder { color: var(--muted); }
+#rename-name { width: 100%; padding: 13px 17px; border: 1px solid var(--border-strong); border-radius: 18px; background: var(--glass-fill); color: var(--text); outline: 0; }
+#rename-name:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 #download-progress { width: 100%; }
 #viewer { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; background: #061823db; backdrop-filter: blur(12px); }
 :root[data-theme="light"] #viewer { background: #eaf4f8e8; color: #173744; }
@@ -274,16 +277,23 @@ h2 { font-size: 20px; font-weight: 500; margin: 0; }
 #unsupported > svg { width: 48px; height: 48px; }
 #unsupported h2 { font-size: 18px; font-weight: 400; margin: 23px; }
 #viewer-loading { position: absolute; font-size: 12px; padding: 11px 18px; border: 1px solid #d9faff38; border-radius: 20px; background: #16486266; backdrop-filter: blur(10px); }
-#viewer > #details { position: absolute; top: 84px; right: 24px; bottom: 100px; width: 270px; max-width: calc(100% - 48px); padding: 25px; border-radius: 22px; overflow: auto; z-index: 3; background: #153f5766; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border); box-shadow: inset 0 1px 0 #ffffff42, 0 16px 42px #001b302d; }
-:root.liquid-ready #viewer > .viewer-tools, :root.liquid-ready #viewer > #details { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+#viewer > #details { position: absolute; top: 84px; right: 24px; bottom: 100px; width: 270px; max-width: calc(100% - 48px); padding: 25px; border-radius: 22px; overflow: auto; z-index: 3; background: #153f5766; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border); box-shadow: inset 0 1px 0 #ffffff42, 0 16px 42px #001b302d; will-change: transform, opacity; }
+:root #viewer > #details.details-opening { animation: details-slide-in .36s cubic-bezier(.22,.75,.2,1) both; }
+:root #viewer > #details.details-closing { animation: details-slide-out .26s cubic-bezier(.4,0,.7,.4) both; pointer-events: none; }
+:root.liquid-ready #viewer > .viewer-tools { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 #details h3 { font-size: 15px; font-weight: 500; margin: 0 0 25px; }
 #details dl { margin: 0; }
 #details dt { font-size: 11px; color: #cce6f2; margin-top: 18px; }
 #details dd { margin: 6px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-#context-menu { position: fixed; z-index: 20; min-width: 195px; padding: 7px; border-radius: 19px; background: #0d405a85; backdrop-filter: blur(20px); }
-#context-menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font-size: 12px; padding: 11px; border-radius: 12px; }
-#context-menu button:hover { background: #ddfaff1f; }
-#context-menu svg { height: 16px; width: 16px; }
+#context-menu { position: fixed; z-index: 20; min-width: 205px; padding: 7px; border: 1px solid #dff8ff52; border-radius: 16px; background: rgba(8, 25, 38, .94); color: #f5fbff; box-shadow: 0 18px 44px #00131f70, inset 0 1px 0 #ffffff28; backdrop-filter: blur(24px) saturate(1.2); -webkit-backdrop-filter: blur(24px) saturate(1.2); }
+#context-menu button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 38px; padding: 9px 11px; border-radius: 10px; color: inherit; text-align: left; font-size: 12px; line-height: 1.35; }
+#context-menu button:hover { background: #c9f7ff20; color: #ffffff; }
+#context-menu button:active { background: #bef2ff32; }
+#context-menu button svg { height: 16px; width: 16px; flex: 0 0 16px; color: #bef2ff; }
+:root[data-theme="light"] #context-menu { border-color: #5c8fa957; background: rgba(247, 252, 255, .96); color: #16313d; box-shadow: 0 18px 44px #294b5c35, inset 0 1px 0 #ffffff; }
+:root[data-theme="light"] #context-menu button:hover { background: #2f7fb51a; color: #0f3549; }
+:root[data-theme="light"] #context-menu button:active { background: #2f7fb52c; }
+:root[data-theme="light"] #context-menu button svg { color: #2f7fb5; }
 #toast { position: fixed; left: 50%; bottom: 55px; transform: translateX(-50%); z-index: 100; max-width: calc(100vw - 32px); padding: 13px 22px; font-size: 12px; border-radius: 24px; border: 1px solid #dcffff70; background: #12435f9e; backdrop-filter: blur(20px); overflow-wrap: anywhere; animation: toast-enter .4s var(--spring) both; }
 #sidebar.drag-over { box-shadow: inset 0 0 0 2px #d5fcff,0 0 30px #c4f8ff30; }
 /* Light theme polish: same glass tint, readable contrast. */
@@ -309,6 +319,8 @@ h2 { font-size: 20px; font-weight: 500; margin: 0; }
 @keyframes folder-enter { from { opacity: 0; translate: -7px 0; } to { opacity: 1; translate: 0 0; } }
 @keyframes loading-pulse { 50% { opacity: .8; } }
 @keyframes scan-spin { to { rotate: 360deg; } }
+@keyframes details-slide-in { from { opacity: .2; transform: translate3d(105%, 0, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+@keyframes details-slide-out { from { opacity: 1; transform: translate3d(0, 0, 0); } to { opacity: .2; transform: translate3d(105%, 0, 0); } }
 @media (max-width: 1100px) {
   :root { --sidebar: 200px; }
   body { padding: 14px; gap: 15px; }

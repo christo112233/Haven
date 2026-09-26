@@ -8,7 +8,7 @@ const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
 const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' : value >= 1024**2 ? (value / 1024**2).toFixed(1) + ' MB' : Math.max(1, Math.round(value / 1024)) + ' KB';
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
-let toastTimer, searchTimer, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false;
+let toastTimer, searchTimer, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false, detailsCloseTimer;
 async function api(method, ...args) {
   if (window.pywebview?.api) return window.pywebview.api[method](...args);
   const response = await fetch('/api/' + method, {method:'POST', headers:{'Content-Type':'application/json','X-Haven-Token':window.HAVEN_TOKEN}, body:JSON.stringify(args)});
@@ -201,6 +201,7 @@ function treeRow(path) {
   row.oncontextmenu = event => {
     event.preventDefault();
     const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
+    actions.unshift(['pencil','重命名',() => renamePath(path,basename(path),true)]);
     if (state.roots.includes(path)) actions.push(['folder-minus','移除根目录', async () => {const saved = await api('remove_folder',path);state.roots = saved.roots;forgetTree(path);await renderTree();if(saved.current) await openFolder(saved.current);else resetEmpty();}]);
     contextMenu(event, actions);
   };
@@ -281,7 +282,7 @@ function card(item,index) {
   }
   node.dataset.index=index;node.title=item.name;node.classList.toggle('selected',state.current?.path===item.path);
   node.onclick=()=>safely(()=>showViewer(Number(node.dataset.index)));
-  node.oncontextmenu=event=>{event.preventDefault();contextMenu(event,[['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['external-link','用默认程序打开',()=>api('file_action',item.path,'open')],['copy','复制路径',()=>api('file_action',item.path,'copy')],['trash-2','移到回收站',()=>trashItem(item)]]);};
+  node.oncontextmenu=event=>{event.preventDefault();contextMenu(event,[['pencil','重命名',()=>renamePath(item.path,item.name,false)],['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['external-link','用默认程序打开',()=>api('file_action',item.path,'open')],['copy','复制路径',()=>api('file_action',item.path,'copy')],['trash-2','移到回收站',()=>trashItem(item)]]);};
   node.querySelector('.card-name').textContent=item.name;
   const meta=node.querySelector('.card-meta');meta.textContent=item.error ? '无法解码 · '+bytes(item.size) : (item.width ? `${item.width} × ${item.height}` : '正在读取')+' · '+bytes(item.size);meta.classList.toggle('card-error',!!item.error);meta.title=item.error||'';
   node.querySelector('.card-date').textContent=date(item.date);
@@ -309,10 +310,53 @@ async function renderGrid() {
 }
 function scheduleRender(){if(renderScheduled)return;renderScheduled=true;requestAnimationFrame(()=>{renderScheduled=false;safely(renderGrid);});}
 function contextMenu(event,actions){const menu=$('context-menu');menu.replaceChildren();for(const [icon,label,action]of actions){const button=document.createElement('button');button.innerHTML=`<i data-lucide="${icon}"></i><span>${escapeHTML(label)}</span>`;button.onclick=()=>{menu.hidden=true;safely(action);};menu.append(button);}menu.hidden=false;icons(menu);menu.style.left=Math.min(event.clientX,innerWidth-menu.offsetWidth-12)+'px';menu.style.top=Math.min(event.clientY,innerHeight-menu.offsetHeight-12)+'px';}
+function requestRename(currentName,directory=false){
+  const dialog=$('rename-dialog'),input=$('rename-name'),form=$('rename-form');
+  $('rename-title').textContent=directory?'重命名文件夹':'重命名文件';
+  input.value=currentName;
+  dialog.showModal();
+  requestAnimationFrame(()=>{input.focus();const extension=directory?input.value.length:Math.max(0,input.value.lastIndexOf('.'));input.setSelectionRange(0,extension||input.value.length);});
+  return new Promise(resolve=>{
+    let settled=false;
+    const finish=value=>{if(settled)return;settled=true;dialog.close();resolve(value);};
+    form.onsubmit=event=>{event.preventDefault();finish(input.value.trim());};
+    $('rename-cancel').onclick=()=>finish(null);
+    $('rename-close').onclick=()=>finish(null);
+    dialog.oncancel=event=>{event.preventDefault();finish(null);};
+  });
+}
+async function renamePath(path,currentName,directory=false){
+  const next=await requestRename(currentName,directory);
+  if(next===null||next===currentName)return;
+  const result=await api('rename',path,next);
+  if(directory){
+    state.roots=result.roots||state.roots;state.expanded=new Set(result.expanded||[]);forgetTree(path);await renderTree();
+    if(result.current){state.folder=result.current;await openFolder(result.current);}else resetEmpty();
+  }else if(state.folder)await openFolder(state.folder);
+  toast(`${directory?'文件夹':'文件'}已重命名`);
+}
 function confirmAction(title,description){$('confirm-title').textContent=title;$('confirm-description').textContent=description;$('confirm-dialog').showModal();return new Promise(resolve=>{const finish=value=>{$('confirm-dialog').close();resolve(value);};$('confirm-ok').onclick=()=>finish(true);$('confirm-cancel').onclick=()=>finish(false);$('confirm-dialog').oncancel=()=>resolve(false);});}
 async function trashItem(item){if(await confirmAction('移到回收站',`确认将「${item.name}」移到回收站？`)){await api('file_action',item.path,'trash',true);closeViewer();await openFolder(state.folder);toast('文件已移到回收站');}}
 function transform(){ $('viewer-image').style.transform=`translate(${state.x}px,${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;$('zoom-label').textContent=Math.round(state.scale*100)+'%';window.havenGlass?.refresh(); }
 function fit(){state.scale=1;state.x=0;state.y=0;transform();}
+function setDetailsOpen(open){
+  const details=$('details');
+  if(!details)return;
+  clearTimeout(detailsCloseTimer);
+  if(open){
+    details.hidden=false;
+    details.classList.remove('details-closing','details-opening');
+    void details.offsetWidth;
+    details.classList.add('details-opening');
+    return;
+  }
+  if(details.hidden)return;
+  details.classList.remove('details-opening','details-closing');
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){details.hidden=true;return;}
+  void details.offsetWidth;
+  details.classList.add('details-closing');
+  detailsCloseTimer=setTimeout(()=>{details.hidden=true;details.classList.remove('details-closing');},240);
+}
 async function showViewer(index){
   if(index<0||index>=state.total)return;
   const item=await ensureItem(index);if(!item)return;state.viewerIndex=index;state.current=item;state.rotation=0;fit();
@@ -331,7 +375,7 @@ async function showViewer(index){
   const fields=[['文件名',item.name],['路径',item.path],['分辨率',item.width?`${item.width} × ${item.height}`:'—'],['文件大小',bytes(item.size)],['拍摄时间',date(item.date)],['修改时间',date(item.mtime)],['类型',item.ext.slice(1).toUpperCase()],['相机',item.camera],['镜头',item.lens],['ISO',item.iso],['光圈',item.aperture?`f/${item.aperture}`:null],['快门',item.shutter?`${item.shutter} s`:null],['时长',item.duration?duration(item.duration):null]];
   $('details').innerHTML='<h3>文件详情</h3><dl>'+fields.filter(([,value])=>value).map(([label,value])=>`<dt>${label}</dt><dd>${escapeHTML(value)}</dd>`).join('')+'</dl>';scheduleRender();
 }
-function closeViewer(){$('viewer-video').pause();$('viewer').close();}
+function closeViewer(){setDetailsOpen(false);$('viewer-video').pause();$('viewer').close();}
 function showUpdate(result){if(!result.available)return;state.update=result.manifest;const data=state.update;$('update-version').textContent=`新版本 ${data.version}`;$('update-notes').textContent=data.notes||'新版本已发布';$('update-size').textContent=bytes(data.size);$('skip-update').hidden=!!data.mandatory;$('later-update').hidden=!!data.mandatory;$('download-progress').hidden=true;$('download-status').textContent='';$('install-update').disabled=false;if(!$('update-dialog').open)$('update-dialog').showModal();}
 async function installUpdate(){await api('install_update',true);$('install-update').disabled=true;$('skip-update').disabled=true;$('later-update').disabled=true;$('download-progress').hidden=false;const poll=async()=>{const progress=await api('update_progress');$('download-progress').value=progress.progress||0;$('download-status').textContent=progress.state==='error'?progress.error:progress.state==='restarting'?'正在重启…':`正在下载 ${progress.progress||0}%`;if(progress.state==='downloading')setTimeout(()=>safely(poll),500);else if(progress.state==='error'){$('install-update').disabled=false;$('skip-update').disabled=false;$('later-update').disabled=false;}};await poll();}
 async function init(){
@@ -363,10 +407,10 @@ async function init(){
   $('thumb-size').oninput=event=>{state.size=Number(event.target.value);document.documentElement.style.setProperty('--tile',state.size+'px');scheduleRender();};$('thumb-size').onchange=()=>safely(()=>api('settings',{thumb_size:state.size}));
   $('recursive').onchange=()=>{if(state.folder)safely(()=>openFolder(state.folder));};$('viewport').onscroll=scheduleRender;new ResizeObserver(scheduleRender).observe($('viewport'));
   $('viewer-close').onclick=closeViewer;$('viewer').oncancel=event=>{event.preventDefault();closeViewer();};
-  $('viewer').addEventListener('close',()=>{const video=$('viewer-video');video.removeAttribute('src');video.load();$('viewer-image').removeAttribute('src');$('details').hidden=true;});
+  $('viewer').addEventListener('close',()=>{const video=$('viewer-video');video.removeAttribute('src');video.load();$('viewer-image').removeAttribute('src');setDetailsOpen(false);});
   $('previous').onclick=()=>safely(()=>showViewer(state.viewerIndex-1));$('next').onclick=()=>safely(()=>showViewer(state.viewerIndex+1));$('rotate').onclick=()=>{state.rotation+=90;transform();};$('fit').onclick=fit;
   $('actual').onclick=()=>{const img=$('viewer-image');state.scale=img.naturalWidth/Math.max(1,img.clientWidth);state.x=state.y=0;transform();};
-  $('info-button').onclick=()=>{$('details').hidden=!$('details').hidden;};
+  $('info-button').onclick=()=>setDetailsOpen($('details').hidden||$('details').classList.contains('details-closing'));
   $('reveal').onclick=()=>safely(()=>api('file_action',state.current.path,'reveal'));$('copy-path').onclick=()=>safely(async()=>{await api('file_action',state.current.path,'copy');toast('路径已复制');});$('system-open').onclick=()=>safely(()=>api('file_action',state.current.path,'open'));$('trash').onclick=()=>safely(()=>trashItem(state.current));
   $('live-play').onclick=()=>{const video=$('viewer-video');$('viewer-image').hidden=true;video.hidden=false;video.src=state.current.live_path?mediaURL({path:state.current.live_path},'original'):mediaURL(state.current,'motion');video.play().catch(()=>{});};
   $('viewer-stage').onwheel=event=>{

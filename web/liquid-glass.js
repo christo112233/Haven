@@ -4,7 +4,7 @@
   const token = window.HAVEN_TOKEN;
   const asset = path => `${path}?token=${encodeURIComponent(token)}`;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  const surfaces = '#sidebar, .glass:not(.toolbar), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row, #toast, #details, .panel-dialog, input[role="switch"], #folder-path';
+  const surfaces = '#sidebar, .glass:not(.toolbar), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row, #toast, .panel-dialog, input[role="switch"], #folder-path';
   const springs = new WeakMap();
   let program, canvas, ctx, scene, blurredScene, blurCtx, lastTheme, themeFade;
   let pointer = {x: -200, y: -200}, cursorTarget = {x: -200, y: -200}, cursorVisible = false, hover = null, pressed = null;
@@ -121,7 +121,9 @@
     const theme = document.documentElement.dataset.theme;
     paintBackdrop(ctx,width,height,theme);
     const viewing = !!document.querySelector('#viewer[open]');
-    if(viewing){ctx.fillStyle=theme==='dark'?'rgba(3,20,33,.8)':'rgba(231,243,248,.82)';ctx.fillRect(0,0,width,height);}
+    // Keep the underlying scene stable while a dialog is open. The dialog's
+    // ::backdrop provides the frosted overlay; tinting this shared texture
+    // would recolor every glass surface behind it and snap back on close.
     // Sample actual local images for glass that overlaps photo/video content.
     const media=activeDialog&&!viewing?[]:document.querySelectorAll(viewing?'#viewer-image, #viewer-video':'.picture img');
     for(const source of media) {

@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -66,6 +67,9 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(all(data and warning is None for data, warning in results))
         self.assertEqual(len(list((self.root / ".Haven" / "thumbs").glob("*.webp"))), len(paths))
         self.assertEqual(cache.read_json(self.root / ".Haven" / "owner.json"), {"app": "Haven"})
+        if os.name == "nt":
+            acl = subprocess.run(["icacls", str(self.root / ".Haven")], check=True, capture_output=True, text=True)
+            self.assertIn("(I)", acl.stdout)
 
     def test_sidebar_tree_counts_media_files(self):
         for index in range(3):
@@ -79,6 +83,37 @@ class CoreTests(unittest.TestCase):
         # 1400 photos can no longer be reported as "1".
         self.assertEqual(listing["count"], 3)
         self.assertEqual([(child["name"], child["count"]) for child in listing["children"]], [("sub", 1)])
+
+    def test_rename_file_and_folder_updates_state(self):
+        library = self.root / "library"
+        library.mkdir()
+        file = self.photo("library/photo.jpg")
+        album = library / "album"
+        album.mkdir()
+        self.photo("library/album/inside.jpg")
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.add_folder(library)
+                renamed = api.rename(str(file), "renamed.jpg")
+                self.assertEqual(Path(renamed["path"]).name, "renamed.jpg")
+                self.assertTrue((library / "renamed.jpg").is_file())
+                self.assertFalse(file.exists())
+                with self.assertRaises(FileExistsError):
+                    api.rename(str(library / "renamed.jpg"), "album")
+                with self.assertRaises(ValueError):
+                    api.rename(str(library / "renamed.jpg"), "../escape.jpg")
+                api.state["current"] = str(album)
+                api.state["expanded"] = [str(library), str(album)]
+                api.settings({})
+                moved = api.rename(str(album), "trip")
+                trip = library / "trip"
+                self.assertTrue((trip / "inside.jpg").is_file())
+                self.assertEqual(Path(moved["current"]), trip)
+                self.assertIn(str(trip), moved["expanded"])
+            finally:
+                api.pool.shutdown()
+                api.raw_pool.shutdown()
 
     def test_nested_folder_is_folded_into_its_parent_root(self):
         self.photo("photos/trip/day1/a.jpg")

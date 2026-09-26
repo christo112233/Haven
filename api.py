@@ -271,6 +271,55 @@ class Api:
                 stack.extend(Path(child["path"]) for child in scanner.children(current)["children"])
         return {"count": count}
 
+    @staticmethod
+    def _renamed_path(value, old, new):
+        if not value or not path_contains(old, value):
+            return value
+        relative = os.path.relpath(value, old)
+        return str(Path(new) if relative == os.curdir else Path(new) / relative)
+
+    def rename(self, path, name):
+        actual = self.authorize(path)
+        if actual.name.casefold() == cache.CACHE_NAME.casefold():
+            raise PermissionError("不能重命名 Haven 缓存目录")
+        if not isinstance(name, str) or not name or not name.strip():
+            raise ValueError("名称不能为空")
+        if name in {".", ".."} or "/" in name or "\\" in name:
+            raise ValueError("名称只能包含当前目录中的单个文件名")
+        if any(ord(char) < 32 or char in '<>:"|?*' for char in name):
+            raise ValueError("名称包含 Windows 不允许的字符")
+        if name[-1] in {".", " "}:
+            raise ValueError("名称不能以空格或句点结尾")
+        stem = name.split(".", 1)[0].upper()
+        if stem in {"CON", "PRN", "AUX", "NUL"} or stem.startswith(("COM", "LPT")) and stem[3:].isdigit() and 1 <= int(stem[3:]) <= 9:
+            raise ValueError("名称是 Windows 保留名称")
+        destination = actual.with_name(name)
+        if destination == actual or destination.name.casefold() == actual.name.casefold():
+            return {"path": str(actual), "name": actual.name, "old_path": str(actual), "roots": self.state["roots"], "expanded": self.state.get("expanded", []), "current": self.state.get("current", "")}
+        if destination.exists():
+            raise FileExistsError("目标名称已经存在")
+        old_path, new_path = str(actual), str(destination)
+        was_directory = actual.is_dir()
+        actual.rename(destination)
+        if was_directory:
+            self.state["roots"] = [self._renamed_path(root, old_path, new_path) for root in self.state["roots"]]
+            self.state["expanded"] = sorted({self._renamed_path(folder, old_path, new_path) for folder in self.state.get("expanded", [])})
+            self.state["current"] = self._renamed_path(self.state.get("current", ""), old_path, new_path)
+            self.settings({})
+        else:
+            # A renamed file has a different cache key. Remove only its old
+            # generated artifacts; the next scan will create the new ones.
+            cache_root = cache.directory(actual.parent, False)
+            for folder_name, suffix in (("thumbs", ".webp"), ("previews", ".jpg")):
+                target = cache_root / folder_name / (actual.name + suffix)
+                signature = target.with_suffix(target.suffix + ".json")
+                for artifact in (target, signature):
+                    try:
+                        artifact.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        return {"path": new_path, "name": destination.name, "old_path": old_path, "roots": self.state["roots"], "expanded": self.state.get("expanded", []), "current": self.state.get("current", "")}
+
     def file_action(self, path, action, confirmed=False):
         actual = self.authorize(path)
         if action == "reveal":

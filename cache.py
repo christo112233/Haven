@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import time
+import uuid
 
 from config import CACHE_NAME, CACHE_VERSION
 
@@ -55,7 +56,9 @@ def directory(folder, create=True):
     if create:
         if not target.exists():
             # Publish a complete cache directory atomically across threads/processes.
-            staging = Path(tempfile.mkdtemp(prefix=".Haven-init-", dir=Path(folder)))
+            # mkdtemp uses mode 0o700, which disables ACL inheritance on Windows.
+            staging = Path(folder) / f".Haven-init-{uuid.uuid4().hex}"
+            staging.mkdir()
             try:
                 atomic_json(staging / "owner.json", {"app": "Haven"})
                 (staging / "thumbs").mkdir()

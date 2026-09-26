@@ -1,339 +1,140 @@
-# Haven
+# Haven · 本地一站式照片管理器
 
-Windows 本地照片与视频管理工具。原生 HTML/CSS/JavaScript + WebGL2 + Python + pywebview/WebView2，无遥测，无云端图库。只有检查与下载更新需要联网。
+<p align="center">
+  <img src="./docs/logo.png" alt="Haven Logo" width="160">
+</p>
+<p align="center">
+  <strong>无云端上传 · 纯本地隐私 · 液态玻璃原生 UI · 沉浸式影像管理</strong>
+</p>
 
-仓库与更新源：<https://github.com/christo112233/Haven>。
+<p align="center">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6?style=flat-square&logo=windows&logoColor=white">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
+  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-100%25%20Local-blueviolet?style=flat-square">
+</p>
 
-## 功能概览
 
-- 添加多个本地根目录，展开子目录，记住上次浏览目录和展开状态。
-- 大缩略图网格，120～480px 尺寸调节，搜索、类型筛选及升降序排序。
-- 图片查看器：缩放、拖动、旋转预览、适应窗口、原始大小和文件详情。
-- 视频抽帧与内嵌播放，Live Photo / 部分 Motion Photo 视频播放。
-- 在资源管理器中定位、默认程序打开、复制路径、确认后移到回收站。
-- 深浅液态玻璃主题，真实背景折射、色散和动态亮边，无边框桌面窗口与玻璃窗口按钮；本地缓存、增量索引、后台解码与虚拟滚动。
-- GitHub Releases 更新检查、下载校验、独立更新器与失败回滚。
 
-不包含照片编辑、AI 分析、人脸识别、云同步或社交分享。
+> **无云端上传 · 纯本地隐私 · 液态玻璃原生 UI · 沉浸式影像管理**
 
-## 开始使用
+Haven 是一款面向 **Windows** 的轻量化本地照片、视频管理工具，基于 **Python + WebView2 + WebGL2** 构建，搭载自研苹果液态玻璃交互体系。全程无后台遥测、无强制云同步、不上传任何本地影像数据，仅版本更新功能需联网，守护你的影像隐私。
 
-需要 **Windows 10/11 x64、Python 3.14、Microsoft Edge WebView2 Runtime**。依赖采用开发时最新稳定版本并固定版本号。
+<p align="left">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6?style=flat-square&logo=windows&logoColor=white">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
+  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-100%25%20Local-blueviolet?style=flat-square">
+</p>
 
-### 运行已打包版本
+---
 
-下载 Release 中的 `Haven-win64.zip`，完整解压到可写目录，例如 `D:\Apps\Haven`，再运行 `Haven.exe`。必须保留同目录的 `_internal/`、`updater.exe` 和 `version.txt`，不能只复制单独的 EXE。打包版本不需要安装 Python。
+## 📑 目录
 
-若提示缺少 WebView2，先安装 Microsoft 官方的 **Evergreen WebView2 Runtime x64**：<https://developer.microsoft.com/microsoft-edge/webview2/>。首次安装运行时可能需要联网；安装完成后浏览照片可离线使用。
+- [✨ 核心特色](#-核心特色)
+- [🖥️ 快速开始](#️-快速开始)
+- [📌 基础功能](#-基础功能)
+- [🔄 更新机制](#-更新机制)
+- [📖 开发文档](#-开发文档)
+- [📄 开源许可](#-开源许可)
+- [⭐ 关于项目](#-关于项目)
 
-### 从源码运行
+---
 
-在项目根目录打开 PowerShell。首次安装执行以下命令；如果已有 `venv`，无需重新创建：
+## ✨ 核心特色
 
-```powershell
+| 特色 | 说明 |
+| :--- | :--- |
+| **极致液态玻璃交互** | 基于 WebGL2 着色器实现真实折射、色散、菲涅尔高光、动态指针反光；原生适配深浅色主题，无第三方框架冗余；低性能设备自动降级 CSS 磨砂玻璃，兼顾颜值与流畅度。 |
+| **零干扰沉浸式体验** | 弱化 UI 遮挡，优先展示影像本身；闲置界面自动淡化，专注照片、视频预览与管理。 |
+| **全格式影像兼容** | 图片：JPG / PNG / WebP / HEIC / TIFF / GIF；相机 RAW：CR2 / NEF / ARW / DNG 等；视频：MP4 / MOV / MKV 预览与抽帧。 |
+| **纯本地隐私优先** | 所有影像文件、缓存、索引均保存在本地磁盘，不读取隐私信息、不联网上传原图，全程离线可用。 |
+| **智能高效管理** | 多目录挂载、实时增量索引、虚拟滚动懒加载、可调节网格布局，支持搜索、筛选、排序，海量图库依旧流畅。 |
+| **稳定自动更新** | 独立更新器设计，支持版本校验、SHA256 完整性校验、更新失败回滚，安全无痛迭代升级。 |
+
+---
+
+## 🖥️ 快速开始
+
+### 系统依赖
+
+| 项目 | 要求 |
+| :--- | :--- |
+| **适配系统** | Windows 10 / Windows 11 (x64) |
+| **必需运行环境** | [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)（绝大多数新版 Windows 已预装，缺失可免费安装） |
+
+### 使用正式打包版（推荐普通用户）
+
+1. 前往 **Releases** 下载最新版 `Haven-win64.zip`
+2. 完整解压至 **非系统、可写目录**（如 `D:\Apps\Haven`）
+3. ⚠️ 务必保留 `_internal/`、`updater.exe`、`version.txt` 全部文件，**不可单独移动 `Haven.exe`**
+4. 双击 `Haven.exe` 即可启动使用
+
+### 源码运行（开发者模式）
+
+> 本地开发、调试需 **Python 3.14** 环境，项目统一使用虚拟环境管理依赖。
+
+```bash
+# 初始化虚拟环境
 python -m venv venv
+
+# 安装全部依赖
 venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 启动程序
 venv\Scripts\python.exe main.py
 ```
 
-也可直接打开指定目录：
-
-```powershell
-venv\Scripts\python.exe main.py --folder "D:\Photos"
-```
-
-点击左侧添加按钮，或把文件夹拖到侧边栏。目录树按需展开，默认浏览当前目录，勾选「包含子文件夹」可递归浏览。添加的文件夹如果已经位于某个已添加目录内，不会重复出现在顶层，而是直接展开到原有目录树中的对应层级。单击照片进入查看器；滚轮缩放、拖动平移、左右键切换、Esc 关闭。旋转只影响查看器，不修改原文件。右键支持系统打开、定位、复制路径和经确认后移到回收站。
+---
 
-桌面窗口采用自绘玻璃控件：右上角可最小化、最大化/还原和关闭；无边框窗口没有系统标题栏，拖动顶部工具栏空白处、左侧 Haven 标志或文件夹标题区都可移动窗口，双击这些区域可最大化/还原（工具栏内的按钮、搜索框和路径按钮保持各自的点击行为）。窗口与任务栏图标取自根目录的 `logo.ico`，打包时该文件也会内嵌进 `Haven.exe` 与 `updater.exe`，并复制到 `_internal/`。右下角可拖动调整窗口大小，最小尺寸为 800 × 560。浏览器预览不显示桌面窗口按钮。
-
-### 虚拟环境约定
+## 📌 基础功能
 
-本项目只使用根目录的 **`venv/`（Python 3.14）**。命令直接调用 `venv\Scripts\python.exe`，无需先激活环境。需要激活时可执行：
+- **多目录管理** — 无限挂载本地 / 移动硬盘目录，自动监听文件变动，支持子目录递归浏览
+- **沉浸式预览** — 大屏原图预览、滚轮缩放、鼠标拖拽平移、方向键切换、`ESC` 快速关闭
+- **基础文件操作** — 资源管理器定位、默认程序打开、复制路径、回收站删除（带二次确认）
+- **多媒体适配** — 视频抽帧预览、内嵌播放，支持 Live Photo / Motion Photo 动态影像识别
+- **个性化主题** — 深色 / 浅色双主题，原生液态玻璃动态 UI，无边框轻量化窗口
+- **智能缓存机制** — 增量索引、缩略图缓存、过期自动失效，大幅提升重复打开速度
 
-```powershell
-.\venv\Scripts\Activate.ps1
-```
+---
 
-之前的 `.venv/` 是为旧依赖建立的临时 Python 3.13 环境，现已删除。`venv/` 不进入 Git，也不放入发布包。GitHub Actions 在构建机上安装自己的 Python 和依赖，不使用你电脑中的虚拟环境。
+## 🔄 更新机制
 
-`requirements.txt` 固定的是已验证的稳定版本。以后升级依赖，应先更新版本并重新测试，再构建发布，不能仅根据本机安装结果判断其他机器也能运行。
+- 🚀 程序启动静默检测官方新版本，支持手动检查更新
+- 🔐 完整校验更新包 **大小 + SHA256 哈希值**，杜绝损坏、篡改安装包
+- 🧩 独立更新进程，支持更新失败 **自动回滚**，不损坏本地程序与用户设置
+- ⚙️ 可自由开启 / 关闭自动更新，**无强制升级**
 
-## 项目文件说明
+---
 
-### Python 核心
+## 📖 开发文档
 
-| 文件 | 作用 |
-| --- | --- |
-| `main.py` | 程序入口；解析 `--folder`、`--browser`、`--port`，启动本地服务和 WebView2 窗口，注册前端 API、文件夹拖放及延迟更新检查。也是 PyInstaller 主程序入口。 |
-| `api.py` | 前端与后端的业务接口；管理根目录、设置、扫描任务、线程/RAW 进程池、分页、排序筛选、文件操作和更新进度。限制访问路径必须属于用户已添加目录。 |
-| `config.py` | 版本号 `VERSION`、缓存版本 `CACHE_VERSION`、程序与资源目录、设置文件位置、支持格式、忽略目录及 GitHub 更新地址。 |
-| `server.py` | 只监听 `127.0.0.1` 的 HTTP 服务；提供前端静态文件、带令牌的 API 与媒体请求，以及视频播放的 HTTP Range 支持。与桌面桥接共用 API 方法白名单。 |
-| `scanner.py` | 使用 `os.scandir()` 浏览/递归扫描目录，跳过缓存及隐藏/系统目录，识别媒体类型、配对 Live Photo，统计每个目录的照片/视频数量供侧边栏显示，并复用未变化文件的索引信息。 |
-| `cache.py` | `.Haven` 缓存路径与所有权管理、JSON 读取、原子写入、并发初始化、Windows 非隐藏属性及缓存清理。 |
-| `thumbs.py` | 根据格式生成缩略图或大图预览；统一缩略图为 WebP，校验缓存签名，只读时返回内存结果。 |
-| `metadata.py` | 读取图片尺寸、EXIF 拍摄时间/相机/镜头/曝光信息，调用 RAW/视频元数据接口，并识别支持的 Motion Photo XMP 视频偏移。 |
-| `raw_handler.py` | 使用 rawpy/LibRaw 读取 RAW；缩略图优先提取内嵌 JPEG，必要时半尺寸解码，大图预览使用解码结果，分辨率从 `raw.sizes` 获取。 |
-| `heic_handler.py` | 调用 `register_heif_opener()` 注册 Pillow 的 HEIC/HEIF 解码器。 |
-| `video_handler.py` | 调用 imageio-ffmpeg 提供的 FFmpeg，读取视频时长/尺寸，抽取第 1 秒画面；短视频抽帧失败时回退到第 0 秒。 |
-| `updater.py` | 主程序中的更新客户端；检查 GitHub 清单、比较版本、验证地址与文件信息、下载并校验包，复制独立更新器并启动它。 |
-| `updater_src/updater.py` | 独立更新器源码，构建为 `updater.exe`；再次校验更新包、检查 ZIP 路径、等待主进程退出、备份替换、失败回滚并重启 Haven。 |
+项目架构、文件说明、打包流程、自动化测试、更新机制、报错排查等完整技术文档：
 
-### 前端
+➡️ **[完整开发文档 →](./docs/开发文档.md)**
 
-| 文件 | 作用 |
-| --- | --- |
-| `web/index.html` | 中文界面结构：目录树、工具栏、网格、查看器、设置、更新与确认弹窗。HTTP 服务在返回页面时注入会话访问令牌。 |
-| `web/app.js` | 原生 JavaScript 交互；调用 pywebview API，浏览器模式回退到 HTTP API，实现目录树、分页、虚拟网格、懒加载、查看器、更新界面，以及自绘的玻璃下拉框（原生 `<option>` 弹层无法套用液态玻璃样式）。 |
-| `web/style.css` | 深浅主题、透明玻璃控件、入场/悬停/按压动画、弹窗、缩略图与窄窗口布局；提供无 WebGL 时的样式回退。 |
-| `web/liquid-glass.js` | 共享 WebGL2 玻璃渲染器；自绘简约渐变背景并在深浅主题间交叉淡化，捕获本地图片纹理，绘制 UI 的折射层，处理高光、弹性筛选切换和滑块形变。弹窗使用独立顶层画布。空闲降帧、页面不可见时暂停，并尊重系统减少动效设置。 |
-| `web/shaders/liquid.vert` | 玻璃渲染的全屏顶点着色器。 |
-| `web/shaders/liquid.frag` | 基于参考项目原理的玻璃片元着色器：弧面 SDF、Snell 折射、色散、Fresnel 亮边、指针方向高光和内部柔化。 |
-| `web/shaders/vendor/liquid-glass/sdf.glsl` | 参考仓库中的圆角/超椭圆 SDF 与形状融合函数。 |
-| `web/shaders/vendor/liquid-glass/math.glsl` | 参考仓库中的安全反三角函数，防止边缘折射出现无效数值。 |
-| `web/shaders/vendor/liquid-glass/color.glsl` | 参考仓库中的 sRGB、Lab/LCH 等颜色转换函数，用于生成玻璃反射亮边。 |
-| `web/shaders/vendor/liquid-glass/LICENSE` | 上述参考代码的 MIT 许可证。 |
-| `web/assets/lucide.min.js` | 本地打包的 Lucide 图标库；运行时无需访问 CDN。 |
-| `web/assets/lucide.LICENSE` | Lucide 图标库的许可证文本。 |
+适合二次开发、功能迭代、本地打包、源码学习查阅。
 
-### 构建、测试与仓库配置
+---
 
-| 文件 | 作用 |
-| --- | --- |
-| `requirements.txt` | 固定 Python 依赖版本，包含运行依赖与 PyInstaller 构建工具。 |
-| `build.spec` | PyInstaller 主程序配置；收集前端资源、解码器、FFmpeg、WebView2 所需依赖，以 one-folder 模式生成 `dist/Haven/`。 |
-| `scripts/build.ps1` | 一键构建脚本；优先使用 `venv`，分别构建 Haven 和独立更新器，再复制版本/声明文件并生成 ZIP 与更新清单。 |
-| `scripts/release_manifest.py` | 检查 `config.py` 与 `version.txt` 一致性；压缩允许发布的程序文件，计算实际 SHA256/大小并生成 `update.json`。可传入标签检查版本是否一致。排除设置、运行时资料与更新备份。 |
-| `scripts/native_smoke.py` | 启动隐藏的原生 WebView2 窗口，验证前端可通过桥接获取版本/状态，且没有暴露内部窗口对象；检查后自动退出。 |
-| `scripts/verify_ui.cjs` | Playwright 浏览器验证：245 项测试图库的虚拟滚动、搜索、查看器、主题和窗口尺寸，并将截图写入 `.qa/`。需要另行准备 Node.js、Playwright 和测试图库。 |
-| `scripts/preview_ui.py` | 独立 UI 预览服务；默认端口 8877，使用 `.qa/preview-ui-settings.json` 保存自己的设置，避免验证过程修改真实图库设置。可通过 `--folder` 指定测试照片目录。 |
-| `scripts/verify_glass.cjs` | 液态玻璃专项验证：检测 WebGL2 像素、鼠标引起的光学变化、弹性筛选、虚拟滚动、查看器、深浅/窄窗口、减少动效及无 WebGL 回退。读取 `.qa/glass-server.log` 的独立预览地址。 |
-| `tests/test_core.py` | 后端自动化测试，覆盖缓存并发/失效、EXIF 方向、只读处理、HEIC/TIFF、视频/Motion Photo、路径与令牌限制、更新校验及回滚等。真实 RAW 测试使用可选样本。 |
-| `.github/workflows/release.yml` | GitHub Actions Windows 构建与发布流程；标签触发时自动发布 Release，手动运行时只生成可下载的构建产物。 |
-| `version.txt` | 打包后的安装版本标记；必须与 `config.py` 中的 `VERSION` 一致，独立更新器也会读取它。 |
-| `THIRD_PARTY_NOTICES.md` | 第三方依赖、图标、FFmpeg 及界面参考来源的许可说明。 |
-| `.gitignore` | 排除虚拟环境、Python 缓存、构建产物、用户设置、运行时数据及本地验证资料。 |
-| `README.md` | 安装、开发、架构、打包、发布与更新维护说明。 |
+## 📄 开源许可
 
+本项目基于 **MIT License** 开源，可自由学习、二次开发、非商用 / 商用使用。
 
-## 数据位置
+第三方依赖、着色器代码、图标库许可详见 **[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)**。
 
-- 每个照片目录的 `.Haven/thumbs/`：最长边 512px、质量 85 的 WebP 缩略图。
-- `.Haven/previews/`：RAW/HEIC/TIFF 最长边 2560px 的 JPEG 预览。
-- 缩略图与预览旁的 `*.webp.json`、`*.jpg.json`：对应源文件的修改时间/大小签名与缓存版本，用于防止复用过期图像。
-- `.Haven/index.json`：目录索引和元数据。修改时间纳秒值 + 文件大小 + 缓存版本用于判断失效。
-- `.Haven/owner.json`：缓存所有权标记；拒绝覆盖或清理未经本应用创建的同名目录。
-- 只读照片目录使用内存预览并显示警告，不回退到系统盘缓存。
-- 程序目录的 `haven-settings.json`：根目录、展开状态和设置。
-- 程序目录的 `.haven-runtime/`：WebView2 运行时数据；`.updates/`：更新暂存与备份。照片缓存始终跟随原文件目录。若希望程序数据也不在 C 盘，请将程序安装在其他盘的可写目录。
+---
 
-移除根目录不会删除缓存。文件夹右键的清理缓存会清理该目录及其子目录，仅删除有 Haven 所有权标记的缓存目录。
+## ⭐ 关于项目
 
-## 格式与限制
+Haven 致力于打造一款 **隐私安全、颜值极致、流畅好用** 的本地影像管理工具。摒弃臃肿冗余功能，专注「纯粹看图、高效管理、极致视觉体验」。
 
-支持 JPG/JPEG、PNG、WebP、BMP、GIF 第一帧、TIFF、HEIC/HEIF、CR2/CR3/NEF/ARW/RAF/DNG/ORF/RW2/PEF/SRW，以及 MP4/MOV/M4V/AVI/MKV/WMV/WebM/FLV 的抽帧。具体 RAW 型号以 LibRaw 支持为准。
+后续将持续迭代更多实用功能，敬请期待。
 
-RAW 缩略图优先提取内嵌 JPEG，失败后进行半尺寸解码；RAW 后台处理使用独立进程池。当前 rawpy 没有公共 `raw.metadata` 接口，RAW 分辨率通过 `raw.sizes` 读取，相机/镜头等 EXIF 字段在该解码器未提供时显示为空，不伪造数据。
+> 💡 如果 Haven 对你有帮助，欢迎点一个 **Star** ⭐ 支持项目持续更新～
 
-MP4/WebM 以及 WebView2 能解码的 MOV/M4V 使用内嵌播放；不支持的容器或编码提供系统播放器入口。支持同名照片与 MOV/MP4 配对的 Live Photo，以及包含 Google XMP 视频偏移或容器长度的 Motion Photo；不保证所有厂商的私有 Motion Photo 格式。
+---
 
-界面的玻璃效果复用 Liquid Glass Studio 的 SDF、Snell 折射和颜色转换代码，并将其适配成共享 WebGL2 画布。玻璃边缘折射背景并产生色散与亮边，鼠标移动会改变高光；筛选项弹性切换、滑块按压形变、图片入场和弹窗开关都有动效。照片主体保持原始显示，玻璃处理应用于界面层。
-
-主界面共用一个画布，弹窗共用另一个画布，不为每个控件创建 WebGL 上下文。纹理按内容变更更新，空闲降低渲染频率，隐藏窗口暂停绘制。WebGL2 不可用时回退到 CSS 透明/模糊样式，仍可浏览图库；系统启用「减少动效」时关闭位移动画与周期高光。没有嵌入参考项目的 React 应用或 WebGPU 后端。界面背景由程序自绘的渐变与 WebGL 着色器生成，没有外部图片素材；着色器与图标均为本地文件，不依赖 CDN。
-
-## 开发与验证
-
-```powershell
-venv\Scripts\python.exe -m unittest discover -s tests -v
-venv\Scripts\python.exe main.py --browser --port 8765
-```
-
-浏览器预览地址包含启动时生成的访问令牌，使用终端打印的完整 URL。服务只监听 `127.0.0.1`，媒体路径只能来自用户已添加目录。浏览器模式使用路径输入框代替系统目录选择器。不要向他人分享运行中的令牌 URL。
-
-原生桥接检查：
-
-```powershell
-venv\Scripts\python.exe scripts\native_smoke.py
-```
-
-后端测试的临时文件均写入项目 `.qa/`。如果存在 `.qa/sample.CR2`，会额外测试真实 RAW 进程池解码；缺少样本时该项自动跳过，其他测试正常运行。
-
-`scripts/verify_ui.cjs` 是本地验证脚本，需要浏览器服务的启动 URL 保存在 `.qa/server.log`，以及 `.qa/gallery/` 中恰好 245 张 JPG，文件名为 `Photo-000.jpg` 到 `Photo-244.jpg`。该脚本包含对这些文件名和数量的断言，不能直接换成任意图库。
-
-没有测试图库时，可将一张本地 JPG 复制成测试数据。以下命令中的源照片路径需要替换为实际路径，仅复制文件，不修改原照片：
-
-```powershell
-New-Item -ItemType Directory -Force .qa\gallery | Out-Null
-$qaSourcePhoto = 'D:\Photos\sample.jpg'
-0..244 | ForEach-Object {
-    Copy-Item -LiteralPath $qaSourcePhoto -Destination (Join-Path '.qa\gallery' ('Photo-{0:000}.jpg' -f $_))
-}
-```
-
-准备一个没有其他媒体文件的测试图库；如果 `.qa/gallery/` 已有测试数据，不需要再次复制。确认端口 `8765` 未占用，再启动后台验证服务：
-
-```powershell
-$qaPython = Join-Path (Get-Location) 'venv\Scripts\python.exe'
-$qaServer = Start-Process -FilePath $qaPython -ArgumentList @('main.py', '--browser', '--port', '8765') -WindowStyle Hidden -RedirectStandardOutput '.qa\server.log' -RedirectStandardError '.qa\server-error.log' -PassThru
-```
-
-安装工具并运行：
-
-```powershell
-npm.cmd install --prefix .qa playwright
-npx.cmd --prefix .qa playwright install chromium
-node scripts\verify_ui.cjs
-Stop-Process -Id $qaServer.Id
-```
-
-这些 Node.js 工具仅用于开发验证，应用和发布包均不依赖 Node.js。脚本会添加测试图库并切换主题等设置，建议在独立的开发目录中运行；结束后可在 Haven 侧边栏移除测试根目录。
-
-
-## 本地打包
-
-所有命令都在项目根目录执行。关闭正在运行的 `dist/Haven/Haven.exe`，避免 Windows 锁住程序文件。`dist/Haven/` 是构建输出目录，重新构建会重建该目录；不要把正式使用的个人安装目录直接当作构建目录。
-
-打包脚本会把根目录的 `logo.ico` 内嵌为 `Haven.exe` 和 `updater.exe` 的图标（资源管理器、任务栏与窗口图标一致），运行时的窗口图标还会直接读取 `_internal/logo.ico`。
-
-1. 检查 Python 与依赖，并运行测试：
-
-```powershell
-venv\Scripts\python.exe --version
-venv\Scripts\python.exe -m pip install -r requirements.txt
-venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
-2. 确认 `config.py` 中的 `VERSION` 与根目录 `version.txt` 相同
-
-3. 执行一键构建：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1
-```
-
-4. 运行 `dist/Haven/Haven.exe` 检查目录选择、图片/RAW/HEIC、视频和文件操作，再确认发布文件已生成。
-
-输出结构大致如下，`_internal/` 内还包括 Python 运行时、第三方库和资源：
-
-```text
-dist/
-├─ Haven/
-│  ├─ Haven.exe
-│  ├─ updater.exe
-│  ├─ version.txt
-│  ├─ THIRD_PARTY_NOTICES.md
-│  └─ _internal/
-│     └─ web/
-├─ helper/
-│  └─ updater.exe
-├─ Haven-win64.zip
-└─ update.json
-```
-
-应用以 **one-folder** 模式输出。独立 `updater.exe` 是可搬移的 one-file 文件，更新时复制到程序目录的 `.updates/` 子目录运行，避免替换正在执行的更新器。这个 one-file 设置仅用于独立更新器，主应用仍是 one-folder。
-
-ZIP 内直接放置 `Haven.exe`、`_internal/` 等程序文件，不再套一层 `Haven/`。独立更新器依赖这个结构，不应手工改变压缩层级。
-
-如果只需重新压缩现有构建并生成清单，可执行：
-
-```powershell
-venv\Scripts\python.exe scripts\release_manifest.py v0.2.0
-```
-
-这里的标签必须对应当前版本。该命令**不会重新编译程序**；修改 Python 源码或版本后应先完整构建，避免清单版本与实际 EXE 不一致。
-
-## 发布新版本与更新
-
-### 推荐：GitHub Actions 自动发布
-
-1. 修改 `config.py` 的 `VERSION` 与 `version.txt`，将版本升到更高版本，例如从 `0.1.0` 升到 `0.2.0`。使用正式版本 `X.Y.Z`，标签写成 `vX.Y.Z`。
-2. 需要在应用内展示具体更新说明时，修改 `scripts/release_manifest.py` 中生成清单的 `notes` 字段。GitHub Release 页面正文与应用弹窗的 `notes` 是两个独立位置。
-3. 执行测试和本地打包，检查通过后提交并推送源码。
-4. 为这个提交创建匹配的标签并推送。以下示例命令需要将版本替换为实际发布版本：
-
-```powershell
-git status
-git add .
-git commit -m "Release v0.2.0"
-git push
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-如果当前代码已提交，跳过 `git add` 和 `git commit`。发布标签必须指向包含新版本代码的提交，不要重复使用已发布的版本号。
-
-5. 在仓库的 **Actions → Windows Release** 查看构建。工作流安装 Python 3.14、安装固定依赖、运行测试、构建两个 EXE、生成 ZIP/清单并验证标签版本。
-6. 工作流成功后，在 **Releases** 确认新版本已发布，包含这两个附件：
-
-- `Haven-win64.zip`
-- `update.json`
-
-仓库需要启用 GitHub Actions。工作流声明了 `contents: write`，使用仓库自动提供的 `GITHUB_TOKEN` 发布，通常无需另设个人访问令牌；组织策略仍可能限制写权限。
-
-在 Actions 页面手动点击 **Run workflow** 只会构建并上传 `Haven-win64` 构建产物，**不会创建 Release**。要自动发布，应推送版本标签。
-
-### 手动发布
-
-1. 按「本地打包」完成测试与构建，确保 ZIP 和清单是同一次构建的产物。
-2. 将源码提交到 GitHub，在仓库 **Releases → Draft a new release** 创建或选择匹配标签，例如 `v0.2.0`，并确认标签指向正确提交。
-3. 填写版本名称、更新说明，上传 `dist/Haven-win64.zip` 和 `dist/update.json`。
-4. 发布为正式 Release，并确认该版本是 **Latest**。不要仅保存草稿或勾选 Pre-release，自动更新读取的是 `/releases/latest/download/update.json`。
-5. 检查 `update.json` 的下载地址能访问该 Release 下的 ZIP，再从旧版本 Haven 的设置中点击「检查更新」验证。
-
-如果修改了 ZIP，必须重新计算 SHA256 和大小并同步清单；最简单的方式是重新运行构建/清单脚本并重新上传两个附件。不要只替换其中一个。
-
-### 更新清单格式
-
-下面仅说明字段，实际 SHA256 与大小由脚本生成，不要把占位值用于发布：
-
-```json
-{
-  "version": "0.2.0",
-  "url": "https://github.com/christo112233/Haven/releases/download/v0.2.0/Haven-win64.zip",
-  "sha256": "这里必须是 ZIP 文件的实际 64 位十六进制 SHA256",
-  "size": 12345678,
-  "mandatory": false,
-  "notes": "本次更新说明"
-}
-```
-
-| 字段 | 要求 |
-| --- | --- |
-| `version` | 高于用户当前版本，与 ZIP 内 `version.txt` 一致。 |
-| `url` | 本仓库 GitHub Releases 下的 HTTPS ZIP 下载地址。更换仓库时必须同时调整 `config.py` 并重新构建应用。 |
-| `sha256` | 完整 ZIP 的 SHA256，校验不一致会中止更新。 |
-| `size` | 完整 ZIP 的字节数，不能填 MB 数值。 |
-| `mandatory` | 默认 `false`；设为 `true` 时更新弹窗只提供「立即更新」，不提供跳过/稍后按钮。 |
-| `notes` | 应用更新弹窗内的说明文字，支持换行。 |
-
-如需设置强制更新，可修改生成脚本中的 `mandatory` 字段；手动修改生成的 `dist/update.json` 也可以，但再次执行生成脚本会恢复脚本中定义的值。
-
-### 用户端更新流程
-
-1. 桌面程序启动后延迟 5 秒检查正式 Release 的清单；可在设置中关闭自动检查或手动检查。网络失败不会影响本地浏览。
-2. 使用 `packaging.version.Version` 判断版本，只允许升级。普通更新可选择立即更新、稍后提醒或跳过该版本；稍后会在下次启动再次检查。
-3. 用户确认更新后，下载到安装目录的 `.updates/`，显示进度并校验大小与 SHA256。
-4. 主程序将 `updater.exe` 复制到更新工作目录，写入 `plan.json`，启动副本后退出。
-5. 独立更新器再次校验包与版本，检查压缩路径，等待主进程结束，备份允许替换的程序文件，再安装新文件并重启 Haven。
-6. `haven-settings.json`、照片原件和各照片目录的 `.Haven` 不属于替换范围。备份保留在 `.updates/`，确认更新正常后可清理。
-
-更新失败时会提示错误；替换过程中的失败会尝试恢复旧文件。详细错误可在 `.updates/haven-*/update-error.txt` 查看，旧程序文件位于该工作目录的 `backup/`。如果自动恢复也受到权限或文件占用影响，关闭 Haven 后可使用备份或重新解压完整发布包恢复，操作前保留个人设置。
-
-源码运行模式支持检查更新，但不允许原地自动替换源码；完整升级流程需要使用打包后的 `Haven.exe`。正式发布前应保留一份旧版本，在独立安装目录中实际升级到新版本，验证重启、设置保留和照片缓存不受影响。
-
-## 常见问题
-
-| 问题 | 排查方法 |
-| --- | --- |
-| Python 版本或依赖不兼容 | 使用 `venv\Scripts\python.exe --version` 确认是 Python 3.14，重新按 `requirements.txt` 安装。项目不再使用 `.venv`。 |
-| 打包时出现权限/文件占用错误 | 关闭构建目录中的 Haven 和独立更新器，确认目录可写，重新运行构建。 |
-| `version.txt must match config.VERSION` | 将 `version.txt` 和 `config.py` 的版本号改为相同值，再完整构建。 |
-| 标签检查失败 | Git 标签需要是 `v` 加当前版本，例如配置为 `0.2.0` 时应推送 `v0.2.0`。 |
-| 检查更新返回 404 | 确认已经发布正式 Latest Release，且附件名称为 `update.json`；首次 Release 发布前没有可读取的清单属于正常情况。 |
-| 没发现新版本 | 检查新版本是否更高、是否被标为 Latest、是否曾选择跳过该版本。可用手动检查再次查看。 |
-| 下载校验失败 | ZIP 与清单可能不配套，重新生成 SHA256/大小并上传两个附件。 |
-| 自动更新无法写入目录 | 将整个应用放在用户可写目录，避免直接安装到受保护的 `Program Files` 等位置。 |
-| 照片缓存不可写 | 查看 UI 警告，检查照片目录权限；只读时仍可内存预览，但下次需要重新生成。 |
-| RAW 或视频无法预览 | RAW 支持取决于 LibRaw 对具体相机格式的支持；视频播放取决于 WebView2 解码能力，可用系统默认程序打开。 |
-| 解压后只有 EXE 无法运行 | 必须完整保留 ZIP 中的所有程序文件与 `_internal/`。 |
-
-本地构建与自动化测试不能替代跨机器验收。发布前应在干净的 Windows 机器上验证 WebView2、真实 RAW/HEIC、回收站及一次完整版本升级，并检查第三方许可声明是否随包分发。
+<p align="center">
+  <sub>Made with ❤️ by Haven</sub>
+</p>
