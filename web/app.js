@@ -92,7 +92,9 @@ async function addFolder(path) {
   if (!path && !state.desktop) { $('path-dialog').showModal(); $('folder-path').focus(); return; }
   const result = await api('add_folder', path || null);
   if (result.cancelled) return;
-  state.roots = [...result.roots]; state.expanded.add(result.path);
+  state.roots = [...result.roots];
+  // The backend folds folders that already live inside an added folder into that tree.
+  if (result.expanded) state.expanded = new Set(result.expanded); else state.expanded.add(result.path);
   await api('settings', {expanded:[...state.expanded]});
   await renderTree(); await openFolder(result.path);
 }
@@ -132,11 +134,12 @@ async function renderTree() {
   });
   const keep = new Set(plan.map(item => item.path));
   for (const row of [...tree.children]) if (!keep.has(row.dataset.path)) { state.rows.delete(row.dataset.path); row.remove(); }
-  rows.forEach((row, index) => {
-    const following = rows[index + 1] || null;
-    const anchor = following && following.parentNode === tree ? following : null;
-    if (row.parentNode !== tree || row.nextSibling !== anchor) tree.insertBefore(row, anchor);
-  });
+  // Place rows from the bottom up: each row is inserted before the next one, which already sits
+  // in the tree by then. Placing top-down would move parents behind the children they gained.
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index], next = rows[index + 1] || null;
+    if (row.parentNode !== tree || row.nextSibling !== next) tree.insertBefore(row, next);
+  }
   icons(tree);
 }
 function treeRow(path) {
@@ -334,7 +337,7 @@ async function init(){
   $('check-update').onclick=()=>safely(async()=>{$('check-update').disabled=true;$('update-check-status').textContent='正在检查…';try{const result=await api('check_update',true);$('update-check-status').textContent=result.error||(result.available?'发现新版本':'已是最新版本');if(result.available){$('settings-dialog').close();showUpdate(result);}}finally{$('check-update').disabled=false;}});
   $('later-update').onclick=()=>$('update-dialog').close();$('skip-update').onclick=()=>safely(async()=>{await api('settings',{skipped_version:state.update.version});$('update-dialog').close();});$('install-update').onclick=()=>safely(installUpdate);$('update-dialog').oncancel=event=>{if(state.update?.mandatory||$('install-update').disabled)event.preventDefault();};
   $('sidebar').ondragover=event=>{event.preventDefault();$('sidebar').classList.add('drag-over');};$('sidebar').ondragleave=()=>$('sidebar').classList.remove('drag-over');$('sidebar').ondrop=event=>{event.preventDefault();$('sidebar').classList.remove('drag-over');for(const file of event.dataTransfer.files){const path=file.pywebviewFullPath||file.path;if(path)safely(()=>addFolder(path));}};
-  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
+  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;if(event.detail.expanded)state.expanded=new Set(event.detail.expanded);else state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
   await renderTree();if(boot.state.current&&state.roots.length)await openFolder(boot.state.current);
 }
 document.addEventListener('DOMContentLoaded',()=>safely(init));

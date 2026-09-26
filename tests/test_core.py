@@ -80,6 +80,34 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(listing["count"], 3)
         self.assertEqual([(child["name"], child["count"]) for child in listing["children"]], [("sub", 1)])
 
+    def test_nested_folder_is_folded_into_its_parent_root(self):
+        self.photo("photos/trip/day1/a.jpg")
+        self.photo("photos/trip/day2/b.jpg")
+        self.photo("photos/other/c.jpg")
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                parent = str(self.root / "photos")
+                child = str(self.root / "photos" / "trip")
+                self.assertEqual(api.add_folder(parent)["roots"], [parent])
+                # Adding a folder that already lives inside a root must not create a second top-level entry.
+                result = api.add_folder(child)
+                self.assertEqual(result["roots"], [parent])
+                self.assertIn(parent, result["expanded"])
+                self.assertIn(child, result["expanded"])
+                api.settings({})  # persist, then reload the state from disk
+                reloaded = Api()
+                try:
+                    self.assertEqual(reloaded.state["roots"], [parent])
+                    # Adding the parent of an existing root folds the old root into it.
+                    self.assertEqual(reloaded.add_folder(str(self.root))["roots"], [str(self.root)])
+                finally:
+                    reloaded.pool.shutdown()
+                    reloaded.raw_pool.shutdown()
+            finally:
+                api.pool.shutdown()
+                api.raw_pool.shutdown()
+
     def test_desktop_window_actions(self):
         with patch("config.STATE_PATH", self.root / "settings.json"):
             api = Api()

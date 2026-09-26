@@ -24,6 +24,13 @@ def process_item(item):
     return item
 
 
+def path_contains(parent, path):
+    """True when path is parent itself or lives inside it (Windows-friendly, case-insensitive)."""
+    parent = os.path.normcase(os.path.abspath(parent))
+    path = os.path.normcase(os.path.abspath(path))
+    return path == parent or path.startswith(parent.rstrip("\\/") + os.sep)
+
+
 class Api:
     def __init__(self):
         self.window = None
@@ -35,6 +42,12 @@ class Api:
         self.state.setdefault("auto_update", True)
         self.state.setdefault("theme", "dark")
         self.state.setdefault("thumb_size", 240)
+        # Older states could store a folder and its own subfolder as separate roots.
+        if self._merge_roots():
+            try:
+                cache.atomic_json(config.STATE_PATH, self.state)
+            except OSError:
+                pass
         self.jobs = {}
         self.lock = threading.RLock()
         self.scan_lock = threading.Lock()
@@ -103,18 +116,63 @@ class Api:
         if not folder.is_dir():
             raise ValueError("请选择文件夹")
         with self.lock:
-            if str(folder) not in self.state["roots"]:
+            # A folder inside an already added folder is part of that tree, not a second root.
+            if not any(path_contains(root, str(folder)) for root in self.state["roots"]):
                 self.state["roots"].append(str(folder))
+            self._merge_roots()
+            expanded = set(self.state.get("expanded", []))
+            expanded.add(str(folder))
+            owner = next((root for root in self.state["roots"] if path_contains(root, str(folder)) and os.path.normcase(root) != os.path.normcase(str(folder))), None)
+            if owner:
+                expanded.add(owner)
+                expanded.update(self._ancestors(str(folder), owner))
+            self.state["expanded"] = sorted(expanded)
             self.settings({"current": str(folder)})
-        return {"path": str(folder), "roots": self.state["roots"]}
+        return {"path": str(folder), "roots": self.state["roots"], "expanded": self.state["expanded"]}
 
     def remove_folder(self, path):
         with self.lock:
             self.state["roots"] = [root for root in self.state["roots"] if root != path]
+            self._merge_roots()
             if self.state.get("current", "").startswith(path):
                 self.state["current"] = self.state["roots"][0] if self.state["roots"] else ""
             self.settings({})
         return self.state
+
+    def _ancestors(self, folder, root):
+        """Folders strictly between root and folder, nearest first."""
+        steps = []
+        current = Path(folder).parent
+        while path_contains(root, str(current)) and os.path.normcase(str(current)) != os.path.normcase(root):
+            steps.append(str(current))
+            if current.parent == current:
+                break
+            current = current.parent
+        return steps
+
+    def _merge_roots(self):
+        """Keep the outermost photo folders only, so the sidebar never shows a nested folder twice."""
+        merged, nested = [], []
+        for root in list(self.state.get("roots", [])):
+            if any(path_contains(existing, root) for existing in merged):
+                nested.append(root)
+                continue
+            for existing in [item for item in merged if path_contains(root, item)]:
+                merged.remove(existing)
+                nested.append(existing)
+            merged.append(root)
+        if merged == self.state.get("roots", []):
+            return False
+        self.state["roots"] = merged
+        expanded = set(self.state.get("expanded", []))
+        for folder in nested:
+            owner = next((root for root in merged if path_contains(root, folder)), None)
+            if owner and os.path.normcase(owner) != os.path.normcase(folder):
+                # Expand the folder that absorbed it, so the nested folder stays visible.
+                expanded.add(owner)
+                expanded.update(self._ancestors(folder, owner))
+        self.state["expanded"] = sorted(expanded)
+        return True
 
     def folders(self, path):
         return scanner.children(self.authorize(path))
