@@ -6,7 +6,7 @@
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const surfaces = '#sidebar, .glass:not(.toolbar), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row.active, #toast, #details, .panel-dialog, input[role="switch"], #folder-path';
   const springs = new WeakMap();
-  let program, canvas, ctx, scene, blurredScene, blurCtx, wallpapers, lastTheme;
+  let program, canvas, ctx, scene, blurredScene, blurCtx, lastTheme, themeFade;
   let pointer = {x: -200, y: -200}, hover = null, pressed = null;
   let frame = 0, lastTick = 0, lastPaint = 0, sceneDirty = true, running = true;
   let activePill = null, sliderThumb = null;
@@ -58,19 +58,50 @@
     return {gl:context,program:shaderProgram,texture:sceneTexture,blurredTexture,uniforms,target,revision:-1};
   }
 
-  const loadImage = path => new Promise((resolve,reject) => {const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=asset(path);});
+  // Haven paints its own quiet backdrop: two soft light pools over a calm vertical gradient.
+  const backdrops = {
+    dark: {
+      base: [[0,'#070f18'],[.48,'#0c1a26'],[1,'#091320']],
+      glows: [[.12,.06,1.15,'64,150,206',.2],[.9,.96,1.05,'102,120,216',.16]],
+      vignette: [[.45,'rgba(0,0,0,0)'],[1,'rgba(0,0,0,.42)']]
+    },
+    light: {
+      base: [[0,'#f9fcfe'],[.5,'#eef5fa'],[1,'#e7f0f7']],
+      glows: [[.1,.04,1.15,'132,186,228',.34],[.92,.98,1.05,'178,188,236',.32]],
+      vignette: [[.45,'rgba(255,255,255,0)'],[1,'rgba(126,148,170,.22)']]
+    }
+  };
 
-  function cover(image, width, height) {
-    const scale = Math.max(width/image.width,height/image.height);
-    ctx.drawImage(image,(width-image.width*scale)/2,(height-image.height*scale)/2,image.width*scale,image.height*scale);
+  function paintBackdrop(context, width, height, theme) {
+    const palette = backdrops[theme === 'light' ? 'light' : 'dark'];
+    const base = context.createLinearGradient(0, 0, width * .55, height);
+    for (const [stop, color] of palette.base) base.addColorStop(stop, color);
+    context.fillStyle = base; context.fillRect(0, 0, width, height);
+    for (const [x, y, radius, rgb, alpha] of palette.glows) {
+      const glow = context.createRadialGradient(width * x, height * y, 0, width * x, height * y, Math.max(width, height) * radius);
+      glow.addColorStop(0, `rgba(${rgb},${alpha})`);
+      glow.addColorStop(1, `rgba(${rgb},0)`);
+      context.fillStyle = glow; context.fillRect(0, 0, width, height);
+    }
+    const vignette = context.createRadialGradient(width / 2, height * -.08, 0, width / 2, height * -.08, Math.max(width, height) * 1.3);
+    for (const [stop, color] of palette.vignette) vignette.addColorStop(stop, color);
+    context.fillStyle = vignette; context.fillRect(0, 0, width, height);
+  }
+
+  function beginThemeFade() {
+    if (reducedMotion.matches || !scene || !scene.width) return;
+    const snapshot = document.createElement('canvas');
+    snapshot.width = scene.width; snapshot.height = scene.height;
+    snapshot.getContext('2d', {alpha:false}).drawImage(scene, 0, 0);
+    themeFade = {canvas: snapshot, start: performance.now(), duration: 560};
+    lastInteraction = performance.now(); sceneDirty = true;
   }
 
   function captureScene() {
     const width = innerWidth, height = innerHeight;
     if(scene.width!==width||scene.height!==height){scene.width=width;scene.height=height;}
     const theme = document.documentElement.dataset.theme;
-    cover(wallpapers[theme==='dark'?1:0],width,height);
-    ctx.fillStyle = theme==='dark'?'rgba(3,13,24,.25)':'rgba(6,30,53,.08)';ctx.fillRect(0,0,width,height);
+    paintBackdrop(ctx,width,height,theme);
     const viewing = !!document.querySelector('#viewer[open]');
     if(viewing){ctx.fillStyle='rgba(3,20,33,.8)';ctx.fillRect(0,0,width,height);}
     // Sample actual local images for glass that overlaps photo/video content.
@@ -91,10 +122,17 @@
       }else ctx.drawImage(image,rect.x+(rect.width-w)/2,rect.y+(rect.height-h)/2,w,h);
       ctx.restore();
     }
-    if(activeDialog&&activeDialog.id!=='viewer'){ctx.fillStyle='rgba(3,20,33,.15)';ctx.fillRect(0,0,width,height);}
+    // Dialogue panels sample a calm, evenly dimmed backdrop instead of the photos behind them.
+    if(activeDialog&&activeDialog.id!=='viewer'){ctx.fillStyle=theme==='dark'?'rgba(4,17,28,.55)':'rgba(238,246,251,.62)';ctx.fillRect(0,0,width,height);}
+    if(themeFade){
+      const progress=(performance.now()-themeFade.start)/themeFade.duration;
+      if(progress>=1)themeFade=null;
+      else{ctx.globalAlpha=1-progress;ctx.drawImage(themeFade.canvas,0,0,width,height);ctx.globalAlpha=1;sceneDirty=true;}
+    }
     if(blurredScene.width!==width||blurredScene.height!==height){blurredScene.width=width;blurredScene.height=height;}
-    blurCtx.filter='blur(14px)';blurCtx.drawImage(scene,0,0);blurCtx.filter='none';
-    sceneDirty=false;lastTheme=theme;sceneRevision++;
+    blurCtx.filter='blur(20px)';blurCtx.drawImage(scene,0,0);blurCtx.filter='none';
+    // Keep repainting while the crossfade runs, otherwise the glass keeps the previous theme's backdrop.
+    sceneDirty=!!themeFade;lastTheme=theme;sceneRevision++;
   }
 
   function spring(node, target, dt, special = false) {
@@ -119,9 +157,10 @@
       const style=getComputedStyle(node);
       const radius=Math.min(parseFloat(style.borderTopLeftRadius)||8,bounds.width/2,bounds.height/2);
       const value=spring(node,{x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2,w:bounds.width,h:bounds.height},dt);
-      const panel=node.id==='sidebar'||node.classList.contains('panel-dialog')||node.id==='details';
+      const dialog=node.classList.contains('panel-dialog');
+      const panel=node.id==='sidebar'||dialog||node.id==='details';
       const tinted=node.classList.contains('primary')||node.classList.contains('active');
-      rects.push({...value,radius,panel,tinted,blur:node.classList.contains('panel-dialog')||node.id==='details'?1:panel?.3:.2});
+      rects.push({...value,radius,panel,dialog,tinted,blur:dialog||node.id==='details'?1:panel?.3:.2});
     }
     if(!root) {
       const selected=document.querySelector('#filters [aria-selected="true"]');
@@ -163,7 +202,7 @@
     for(const rect of rects){
       gl.uniform4f(uniforms.u_rect,rect.x,rect.y,rect.w,rect.h);gl.uniform1f(uniforms.u_radius,rect.radius);
       const trail=rect.trail||[0,0,0,0];gl.uniform4fv(uniforms.u_trail,trail);
-      const tint=rect.panel?(dark?[.02,.065,.12,.52]:[.08,.24,.36,.25]):rect.tinted?[.5,.82,.94,dark?.18:.15]:dark?[.025,.075,.13,.22]:[.8,.95,1,.08];
+      const tint=rect.dialog?(dark?[.03,.08,.14,.35]:[.99,1,1,.4]):rect.panel?(dark?[.02,.065,.12,.52]:[.98,.99,1,.5]):rect.tinted?(dark?[.5,.82,.94,.18]:[.35,.72,.95,.26]):dark?[.025,.075,.13,.22]:[1,1,1,.42];
       gl.uniform4fv(uniforms.u_tint,tint);gl.uniform1f(uniforms.u_activity,rect.activity||0);gl.uniform1f(uniforms.u_strength,rect.panel?1.7:1.0);
       gl.uniform1f(uniforms.u_blur,rect.blur||0);
       gl.enable(gl.SCISSOR_TEST);
@@ -213,21 +252,25 @@
     for(const dialog of document.querySelectorAll('dialog')) {
       const show=dialog.showModal.bind(dialog),close=dialog.close.bind(dialog);
       let closing=null;
-      dialog.showModal=()=>{if(closing){clearTimeout(closing);closing=null;}if(dialog.open)return;show();sceneDirty=true;refreshNodes();if(!reducedMotion.matches){dialog.animate([{opacity:0,transform:'translateY(18px) scale(.965)'},{opacity:1,transform:'translateY(0) scale(1)'}],{duration:360,easing:'cubic-bezier(.2,.85,.2,1)'});diagnostics.animations++;}};
-      dialog.close=value=>{if(!dialog.open)return;if(reducedMotion.matches){close(value);return;}dialog.animate([{opacity:1},{opacity:0}],{duration:150,easing:'ease-out'});closing=setTimeout(()=>{close(value);closing=null;sceneDirty=true;},145);};
+      dialog.showModal=()=>{if(closing){clearTimeout(closing);closing=null;}if(dialog.open)return;show();dialog.getAnimations().forEach(animation=>animation.cancel());sceneDirty=true;refreshNodes();if(!reducedMotion.matches){dialog.animate([{opacity:0,transform:'translateY(18px) scale(.965)'},{opacity:1,transform:'translateY(0) scale(1)'}],{duration:360,easing:'cubic-bezier(.2,.85,.2,1)'});diagnostics.animations++;}};
+      dialog.close=value=>{
+        if(!dialog.open)return;
+        if(reducedMotion.matches){close(value);sceneDirty=true;return;}
+        // Fade the panel and its backdrop together, so closing never snaps shut.
+        dialog.animate([{opacity:1,transform:'translateY(0) scale(1)'},{opacity:0,transform:'translateY(9px) scale(.988)'}],{duration:200,easing:'cubic-bezier(.4,0,.7,.4)',fill:'forwards'});
+        try{dialog.animate([{opacity:1},{opacity:0}],{duration:200,easing:'ease-out',pseudoElement:'::backdrop'});}catch(error){}
+        closing=setTimeout(()=>{close(value);closing=null;sceneDirty=true;},195);
+      };
     }
     new MutationObserver(records=>{if(records.some(record=>record.type==='childList'||record.attributeName==='hidden'||record.attributeName==='open'||record.attributeName==='aria-selected'))refreshNodes();}).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','open','aria-selected']});
-    new MutationObserver(()=>sceneDirty=true).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+    new MutationObserver(()=>{beginThemeFade();sceneDirty=true;}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   }
 
   async function init() {
     installMotion();
-    const wallpaper=document.getElementById('wallpaper');
-    wallpaper.style.setProperty('--wallpaper-light',`url("${asset('/assets/glass-light.webp')}")`);
-    wallpaper.style.setProperty('--wallpaper-dark',`url("${asset('/assets/glass-dark.webp')}")`);
     try {
-      const [vertex,fragment,light,dark]=await Promise.all([shaderSource('liquid.vert'),shaderSource('liquid.frag'),loadImage('/assets/glass-light.webp'),loadImage('/assets/glass-dark.webp')]);
-      wallpapers=[light,dark];canvas=document.getElementById('liquid-canvas');
+      const [vertex,fragment]=await Promise.all([shaderSource('liquid.vert'),shaderSource('liquid.frag')]);
+      canvas=document.getElementById('liquid-canvas');
       program=makeRenderer(canvas,vertex,fragment);
       scene=document.createElement('canvas');ctx=scene.getContext('2d',{alpha:false});
       blurredScene=document.createElement('canvas');blurCtx=blurredScene.getContext('2d',{alpha:false});

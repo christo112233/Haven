@@ -1,14 +1,14 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const icons = root => lucide.createIcons({root: root || document, attrs: {'aria-hidden': 'true'}});
-const state = {job: null, folder: '', roots: [], expanded: new Set(), children: new Map(), pages: new Map(), total: 0, kind: 'all', sort: 'name', descending: false, query: '', size: 240, epoch: 0, viewerIndex: 0, current: null, scale: 1, rotation: 0, x: 0, y: 0, desktop: false, update: null};
+const state = {job: null, folder: '', roots: [], expanded: new Set(), children: new Map(), counts: new Map(), rows: new Map(), pages: new Map(), total: 0, kind: 'all', sort: 'name', descending: false, query: '', size: 240, epoch: 0, viewerIndex: 0, current: null, scale: 1, rotation: 0, x: 0, y: 0, desktop: false, update: null};
 const number = new Intl.NumberFormat('zh-CN');
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
 const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' : value >= 1024**2 ? (value / 1024**2).toFixed(1) + ' MB' : Math.max(1, Math.round(value / 1024)) + ' KB';
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
-let toastTimer, searchTimer, pollTimer, renderScheduled = false;
+let toastTimer, searchTimer, pollTimer, themeTimer, renderScheduled = false;
 async function api(method, ...args) {
   if (window.pywebview?.api) return window.pywebview.api[method](...args);
   const response = await fetch('/api/' + method, {method:'POST', headers:{'Content-Type':'application/json','X-Haven-Token':window.HAVEN_TOKEN}, body:JSON.stringify(args)});
@@ -19,7 +19,75 @@ async function api(method, ...args) {
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 5000); }
 async function safely(callback) { try { return await callback(); } catch(error) { toast(error.message || String(error)); } }
 function mediaURL(item, mode = 'thumb') { const params = new URLSearchParams({token:window.HAVEN_TOKEN,path:item.path,mode}); return '/media?' + params; }
-function theme(value) { document.documentElement.dataset.theme = value; $('theme-select').value = value; safely(() => api('settings', {theme:value})); }
+// Native <option> popups cannot be styled, so each select gets a glass listbox that mirrors the real <select>.
+const glassSelects = new Map();
+function glassSelect(id) {
+  const select = $(id);
+  if (!select || glassSelects.has(id)) return glassSelects.get(id);
+  const shell = select.closest('.select-shell, .sort-controls') || select.parentElement;
+  shell.classList.add('select-host');
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'select-button';
+  button.setAttribute('aria-haspopup', 'listbox'); button.setAttribute('aria-expanded', 'false');
+  if (select.getAttribute('aria-label')) button.setAttribute('aria-label', select.getAttribute('aria-label'));
+  button.innerHTML = '<span class="select-value"></span><i data-lucide="chevron-down"></i>';
+  const menu = document.createElement('div');
+  menu.className = 'select-menu glass'; menu.hidden = true; menu.setAttribute('role', 'listbox');
+  const component = {
+    id, select, shell, button, menu,
+    sync() {
+      const option = select.options[select.selectedIndex] || select.options[0];
+      button.querySelector('.select-value').textContent = option ? option.textContent : '';
+      for (const item of menu.children) item.setAttribute('aria-selected', String(item.dataset.value === select.value));
+    },
+    close() { menu.hidden = true; button.setAttribute('aria-expanded', 'false'); shell.classList.remove('select-open'); },
+    open() { closeSelects(); menu.hidden = false; button.setAttribute('aria-expanded', 'true'); shell.classList.add('select-open'); }
+  };
+  for (const option of select.options) {
+    const item = document.createElement('button');
+    item.type = 'button'; item.className = 'select-option'; item.setAttribute('role', 'option');
+    item.dataset.value = option.value; item.textContent = option.textContent;
+    item.onclick = () => { component.close(); if (select.value !== option.value) { select.value = option.value; select.dispatchEvent(new Event('change', {bubbles:true})); } component.sync(); };
+    menu.append(item);
+  }
+  button.onclick = event => { event.stopPropagation(); menu.hidden ? component.open() : component.close(); };
+  button.onkeydown = event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (menu.hidden) { component.open(); return; }
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const next = Math.max(0, Math.min(select.options.length - 1, select.selectedIndex + step));
+      select.selectedIndex = next; component.sync();
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (menu.hidden) component.open();
+      else { component.close(); select.dispatchEvent(new Event('change', {bubbles:true})); }
+    } else if (event.key === 'Escape' && !menu.hidden) { event.stopPropagation(); component.close(); }
+  };
+  select.classList.add('select-native'); select.tabIndex = -1; select.setAttribute('aria-hidden', 'true');
+  shell.insertBefore(button, select.nextSibling);
+  shell.append(menu);
+  glassSelects.set(id, component);
+  icons(shell); component.sync();
+  return component;
+}
+function syncSelect(id) { glassSelects.get(id)?.sync(); }
+function closeSelects() { for (const component of glassSelects.values()) component.close(); }
+function theme(value) {
+  const root = document.documentElement;
+  $('theme-select').value = value;
+  syncSelect('theme-select');
+  if (root.dataset.theme !== value) {
+    // Fade colours and the WebGL backdrop into each other instead of snapping between themes.
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      root.classList.add('theme-switching');
+      clearTimeout(themeTimer);
+      themeTimer = setTimeout(() => root.classList.remove('theme-switching'), 620);
+    }
+    root.dataset.theme = value;
+  }
+  safely(() => api('settings', {theme:value}));
+}
 async function addFolder(path) {
   if (!path && !state.desktop) { $('path-dialog').showModal(); $('folder-path').focus(); return; }
   const result = await api('add_folder', path || null);
@@ -30,49 +98,92 @@ async function addFolder(path) {
 }
 async function renderTree() {
   const treeEpoch = (state.treeEpoch || 0) + 1; state.treeEpoch = treeEpoch;
-  const tree = $('tree'); tree.replaceChildren();
-  async function append(path, depth, root = false, count = '') {
-    if (treeEpoch !== state.treeEpoch) return;
-    const row = document.createElement('div'); row.className = 'tree-row' + (path === state.folder ? ' active' : ''); row.style.paddingLeft = (depth * 12) + 'px';
-    row.innerHTML = `<button class="tree-expand ${state.expanded.has(path) ? 'expanded' : ''}" aria-label="展开或折叠 ${escapeHTML(basename(path))}"><i data-lucide="chevron-right"></i></button><button class="folder-button" title="${escapeHTML(path)}"><i data-lucide="folder"></i><span class="folder-name">${escapeHTML(basename(path))}</span><small></small></button>`;
-    tree.append(row);
-    row.querySelector('small').textContent = count || '';
-    row.querySelector('.folder-button').onclick = () => safely(() => openFolder(path));
-    row.querySelector('.tree-expand').onclick = () => safely(async () => {
-      state.expanded.has(path) ? state.expanded.delete(path) : state.expanded.add(path);
-      await api('settings', {expanded:[...state.expanded]}); await renderTree();
-    });
-    row.oncontextmenu = event => {
-      event.preventDefault();
-      const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {state.children.delete(path);await renderTree();await openFolder(path);} ],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);} }]];
-      if (root) actions.push(['folder-minus','移除根目录', async () => {const saved = await api('remove_folder',path);state.roots = saved.roots;state.children.delete(path);await renderTree();if(saved.current) await openFolder(saved.current);else resetEmpty();}]);
-      contextMenu(event, actions);
-    };
-    if (state.expanded.has(path)) {
-      let children = state.children.get(path);
-      if (!children) {try {children = await api('folders',path);state.children.set(path,children);} catch(error) {row.title = error.message;children=[];}}
-      if(treeEpoch !== state.treeEpoch)return;
-      if(root)row.querySelector('small').textContent = children.length || '';
-      for (const child of children) await append(child.path,depth+1,false,child.count);
+  const tree = $('tree');
+  const plan = [];
+  async function listing(path) {
+    let entry = state.children.get(path);
+    if (!entry) { entry = await api('folders', path); state.children.set(path, entry); }
+    state.counts.set(path, entry.count);
+    for (const child of entry.children) state.counts.set(child.path, child.count);
+    return entry;
+  }
+  async function walk(path, depth) {
+    const entry = await listing(path);
+    plan.push({path, depth, count: entry.count});
+    if (treeEpoch !== state.treeEpoch || !state.expanded.has(path)) return;
+    for (const child of entry.children) {
+      try { await walk(child.path, depth + 1); }
+      catch (error) { plan.push({path: child.path, depth: depth + 1, count: child.count}); }
     }
   }
-  for (const root of state.roots) await append(root,0,true);
+  for (const root of state.roots) {
+    try { await walk(root, 0); }
+    catch (error) { plan.push({path: root, depth: 0, count: state.counts.get(root)}); toast(error.message); }
+  }
+  if (treeEpoch !== state.treeEpoch) return;
+  // Reuse the existing rows so switching folders never re-renders or re-animates the whole list.
+  const rows = plan.map(item => {
+    const row = treeRow(item.path);
+    row.classList.toggle('active', item.path === state.folder);
+    row.style.paddingLeft = (item.depth * 12) + 'px';
+    row.querySelector('.tree-expand').classList.toggle('expanded', state.expanded.has(item.path));
+    row.querySelector('small').textContent = item.count > 0 ? number.format(item.count) : '';
+    return row;
+  });
+  const keep = new Set(plan.map(item => item.path));
+  for (const row of [...tree.children]) if (!keep.has(row.dataset.path)) { state.rows.delete(row.dataset.path); row.remove(); }
+  rows.forEach((row, index) => {
+    const following = rows[index + 1] || null;
+    const anchor = following && following.parentNode === tree ? following : null;
+    if (row.parentNode !== tree || row.nextSibling !== anchor) tree.insertBefore(row, anchor);
+  });
   icons(tree);
 }
+function treeRow(path) {
+  let row = state.rows.get(path);
+  if (row) return row;
+  row = document.createElement('div'); row.className = 'tree-row'; row.dataset.path = path;
+  row.innerHTML = `<button class="tree-expand" aria-label="展开或折叠 ${escapeHTML(basename(path))}"><i data-lucide="chevron-right"></i></button><button class="folder-button" title="${escapeHTML(path)}"><i data-lucide="folder"></i><span class="folder-name">${escapeHTML(basename(path))}</span><small></small></button>`;
+  row.querySelector('.folder-button').onclick = () => safely(() => openFolder(path));
+  row.querySelector('.tree-expand').onclick = () => safely(() => toggleTree(path));
+  row.oncontextmenu = event => {
+    event.preventDefault();
+    const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
+    if (state.roots.includes(path)) actions.push(['folder-minus','移除根目录', async () => {const saved = await api('remove_folder',path);state.roots = saved.roots;forgetTree(path);await renderTree();if(saved.current) await openFolder(saved.current);else resetEmpty();}]);
+    contextMenu(event, actions);
+  };
+  state.rows.set(path, row); icons(row);
+  return row;
+}
+async function toggleTree(path) {
+  state.expanded.has(path) ? state.expanded.delete(path) : state.expanded.add(path);
+  await api('settings', {expanded:[...state.expanded]});
+  await renderTree();
+}
+function forgetTree(path) {
+  for (const key of [...state.children.keys()]) if (key === path || key.startsWith(path + '\\') || key.startsWith(path + '/')) state.children.delete(key);
+  for (const key of [...state.counts.keys()]) if (key === path || key.startsWith(path + '\\') || key.startsWith(path + '/')) state.counts.delete(key);
+  for (const [key, row] of [...state.rows]) if (key === path || key.startsWith(path + '\\') || key.startsWith(path + '/')) { row.remove(); state.rows.delete(key); }
+  state.expanded.delete(path);
+}
+function markTreeSelection(path) { for (const [key, row] of state.rows) row.classList.toggle('active', key === path); }
 function resetEmpty() {
   clearTimeout(pollTimer);state.epoch++;state.job=null;state.folder='';state.pages.clear();state.total=0;
+  state.children.clear();state.counts.clear();state.rows.clear();$('tree').replaceChildren();$('viewport').classList.remove('is-loading');
   $('grid').replaceChildren();$('grid').removeAttribute('style');$('empty').hidden=false;$('empty').querySelector('h2').textContent='打开你的照片文件夹';$('empty-add').hidden=false;
   $('folder-title').textContent='Haven';$('folder-summary').textContent='尚未添加文件夹';$('breadcrumbs').textContent='图库';$('status').textContent='0 个项目';$('scan-progress').hidden=true;
 }
 async function openFolder(path) {
-  clearTimeout(pollTimer);state.epoch++;state.folder=path;state.pages.clear();state.total=0;state.job=null;state.nodes = new Map();
-  $('grid').replaceChildren();$('grid').removeAttribute('style');$('viewport').scrollTop=0;$('warning').hidden=true;$('empty').hidden=false;$('empty').querySelector('h2').textContent='正在扫描文件夹…';$('empty-add').hidden=true;
+  clearTimeout(pollTimer);state.epoch++;state.folder=path;state.pages.clear();state.total=0;state.job=null;
+  // Keep the previous photos on screen (dimmed) until the new folder is ready, instead of blanking the view.
+  $('viewport').classList.add('is-loading');$('viewport').scrollTop=0;$('warning').hidden=true;
+  if($('grid').children.length){$('empty').hidden=true;}else{$('empty').hidden=false;$('empty').querySelector('h2').textContent='正在扫描文件夹…';$('empty-add').hidden=true;}
   $('folder-title').textContent=basename(path);$('folder-parent').textContent=path;$('folder-summary').textContent='正在读取本地文件';
   const segments = path.split(/[\\/]/).filter(Boolean);$('breadcrumbs').replaceChildren();
   segments.forEach((name,index) => {if(index) {const arrow=document.createElement('i');arrow.dataset.lucide='chevron-right';$('breadcrumbs').append(arrow);}const button=document.createElement('button');button.textContent=name;button.title=name;button.onclick=()=>safely(()=>openFolder(segments.slice(0,index+1).join('\\')));$('breadcrumbs').append(button);}); icons($('breadcrumbs'));
   const epoch=state.epoch; const result=await api('open_folder',path,$('recursive').checked);if(epoch!==state.epoch)return;state.job=result.job;
   $('refresh').classList.add('is-scanning');
-  await renderTree(); await poll(epoch);
+  markTreeSelection(path); await poll(epoch);
 }
 async function fetchPage(offset) {
   const epoch = state.epoch;
@@ -100,12 +211,13 @@ async function poll(epoch) {
     const pages = [...state.pages.keys()].filter(page=>page>0);
     for(const page of pages)await fetchPage(page*200);
     await renderGrid();
+    $('viewport').classList.remove('is-loading');
     if(first.state!=='ready')pollTimer=setTimeout(()=>poll(epoch),700);
-  }catch(error){toast(error.message);$('scan-progress').hidden=true;$('refresh').classList.remove('is-scanning');}
+  }catch(error){toast(error.message);$('scan-progress').hidden=true;$('refresh').classList.remove('is-scanning');$('viewport').classList.remove('is-loading');}
 }
 async function reloadFilter() {
   if(!state.job)return;
-  clearTimeout(pollTimer);state.epoch++;state.pages.clear();state.nodes=new Map();$('grid').replaceChildren();$('viewport').scrollTop=0;await poll(state.epoch);
+  clearTimeout(pollTimer);state.epoch++;state.pages.clear();$('viewport').classList.add('is-loading');$('viewport').scrollTop=0;await poll(state.epoch);
 }
 const observer = new IntersectionObserver(entries => {for(const entry of entries)if(entry.isIntersecting){const image=entry.target;if(image.dataset.src){image.src=image.dataset.src;delete image.dataset.src;}observer.unobserve(image);}}, {root:$('viewport'),rootMargin:'250px'});
 function card(item,index) {
@@ -155,7 +267,7 @@ async function showViewer(index){
   $('viewer-name').textContent=item.name;$('viewer-count').textContent=`${index+1} / ${state.total}`;$('previous').disabled=index===0;$('next').disabled=index===state.total-1;
   const image=$('viewer-image'),video=$('viewer-video');video.pause();video.removeAttribute('src');video.load();image.removeAttribute('src');image.hidden=true;video.hidden=true;$('unsupported').hidden=true;$('viewer-loading').hidden=false;$('live-play').hidden=!(item.live_path||item.motion_offset);
   $('rotate').disabled=item.kind==='video';$('actual').disabled=item.kind==='video';
-  if(!$('viewer').open)$('viewer').showModal();
+  if(!$('viewer').open){$('viewer').showModal();$('viewer-stage').focus({preventScroll:true});}
   if(item.kind==='video'){
     $('viewer-loading').hidden=true;
     if(['.mp4','.webm','.m4v','.mov'].includes(item.ext)){video.hidden=false;video.src=mediaURL(item,'original');}else $('unsupported').hidden=false;
@@ -171,11 +283,16 @@ function closeViewer(){$('viewer-video').pause();$('viewer').close();}
 function showUpdate(result){if(!result.available)return;state.update=result.manifest;const data=state.update;$('update-version').textContent=`新版本 ${data.version}`;$('update-notes').textContent=data.notes||'新版本已发布';$('update-size').textContent=bytes(data.size);$('skip-update').hidden=!!data.mandatory;$('later-update').hidden=!!data.mandatory;$('download-progress').hidden=true;$('download-status').textContent='';$('install-update').disabled=false;if(!$('update-dialog').open)$('update-dialog').showModal();}
 async function installUpdate(){await api('install_update',true);$('install-update').disabled=true;$('skip-update').disabled=true;$('later-update').disabled=true;$('download-progress').hidden=false;const poll=async()=>{const progress=await api('update_progress');$('download-progress').value=progress.progress||0;$('download-status').textContent=progress.state==='error'?progress.error:progress.state==='restarting'?'正在重启…':`正在下载 ${progress.progress||0}%`;if(progress.state==='downloading')setTimeout(()=>safely(poll),500);else if(progress.state==='error'){$('install-update').disabled=false;$('skip-update').disabled=false;$('later-update').disabled=false;}};await poll();}
 async function init(){
-  icons();const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;$('thumb-size').value=state.size;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;
+  icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;syncSelect('theme-select');$('thumb-size').value=state.size;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;
   $('window-controls').hidden=!state.desktop;
   $('resize-grip').hidden=!state.desktop;
   $('window-controls').onclick=event=>{const button=event.target.closest('[data-window-action]');if(button)safely(()=>api('window_action',button.dataset.windowAction));};
-  if(state.desktop)document.querySelectorAll('.pywebview-drag-region').forEach(region=>region.ondblclick=()=>safely(()=>api('window_action','maximize')));
+  const WINDOW_DRAG_BLOCKED='button,input,select,textarea,a,label,[role="button"],[data-no-drag]';
+  if(state.desktop)for(const region of document.querySelectorAll('.pywebview-drag-region')){
+    // Keep buttons, inputs and links interactive; everything else in the region drags the frameless window.
+    region.addEventListener('mousedown',event=>{if(event.target.closest(WINDOW_DRAG_BLOCKED))event.stopPropagation();});
+    region.addEventListener('dblclick',event=>{if(!event.target.closest(WINDOW_DRAG_BLOCKED))safely(()=>api('window_action','maximize'));});
+  }
   if(state.desktop){
     let origin=null,pending=null,resizing=false;
     const applyResize=async()=>{if(!pending||resizing)return;resizing=true;const [width,height]=pending;pending=null;try{await api('resize_window',width,height);}catch(error){toast(error.message);}finally{resizing=false;if(pending)applyResize();}};
@@ -185,7 +302,7 @@ async function init(){
   }
   $('add-folder').onclick=$('empty-add').onclick=()=>safely(()=>addFolder());
   $('path-form').onsubmit=event=>{event.preventDefault();safely(async()=>{await addFolder($('folder-path').value.trim());$('path-dialog').close();});};
-  $('refresh').onclick=()=>{state.children.clear();if(state.folder)safely(()=>openFolder(state.folder));};
+  $('refresh').onclick=()=>{state.children.clear();state.counts.clear();safely(async()=>{await renderTree();if(state.folder)await openFolder(state.folder);});};
   $('up-folder').onclick=()=>safely(async()=>{if(!state.folder)return;const parent=state.folder.replace(/[\\/][^\\/]+[\\/]?$/,'');if(parent&&parent!==state.folder)await openFolder(parent);});
   $('theme-button').onclick=()=>theme(document.documentElement.dataset.theme==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
   $('search').oninput=event=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=event.target.value;safely(reloadFilter);},200);};
@@ -202,14 +319,22 @@ async function init(){
   $('live-play').onclick=()=>{const video=$('viewer-video');$('viewer-image').hidden=true;video.hidden=false;video.src=state.current.live_path?mediaURL({path:state.current.live_path},'original'):mediaURL(state.current,'motion');video.play().catch(()=>{});};
   $('viewer-stage').onwheel=event=>{if($('viewer-image').hidden)return;event.preventDefault();state.scale=Math.max(.1,Math.min(20,state.scale*Math.exp(-event.deltaY*.001)));transform();};
   let drag=null;$('viewer-image').onpointerdown=event=>{drag={x:event.clientX,y:event.clientY,baseX:state.x,baseY:state.y};event.currentTarget.setPointerCapture(event.pointerId);event.currentTarget.classList.add('dragging');};$('viewer-image').onpointermove=event=>{if(!drag)return;state.x=drag.baseX+event.clientX-drag.x;state.y=drag.baseY+event.clientY-drag.y;transform();};$('viewer-image').onpointerup=$('viewer-image').onpointercancel=()=>{drag=null;$('viewer-image').classList.remove('dragging');};
-  document.addEventListener('keydown',event=>{if(!$('viewer').open||event.target.closest('input,select')||$('confirm-dialog').open)return;if(event.key==='ArrowRight'){event.preventDefault();safely(()=>showViewer(state.viewerIndex+1));}if(event.key==='ArrowLeft'){event.preventDefault();safely(()=>showViewer(state.viewerIndex-1));}});
-  document.addEventListener('click',event=>{if(!event.target.closest('#context-menu'))$('context-menu').hidden=true;});document.addEventListener('keydown',event=>{if(event.key==='Escape')$('context-menu').hidden=true;});
+  document.addEventListener('keydown',event=>{
+    if(!$('viewer').open||event.target.closest('input,select')||$('confirm-dialog').open)return;
+    if(event.key!=='ArrowRight'&&event.key!=='ArrowLeft')return;
+    event.preventDefault();
+    // Keep focus off the header buttons so arrow keys never paint a focus ring on them.
+    const active=document.activeElement;
+    if(active&&active!==$('viewer-stage')&&active.closest&&active.closest('#viewer'))$('viewer-stage').focus({preventScroll:true});
+    safely(()=>showViewer(state.viewerIndex+(event.key==='ArrowRight'?1:-1)));
+  });
+  document.addEventListener('click',event=>{if(!event.target.closest('#context-menu'))$('context-menu').hidden=true;closeSelects();});document.addEventListener('keydown',event=>{if(event.key==='Escape'){ $('context-menu').hidden=true;closeSelects(); }});
   $('settings-button').onclick=()=>$('settings-dialog').showModal();document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
   $('auto-update').onchange=event=>safely(()=>api('settings',{auto_update:event.target.checked}));$('history').onclick=()=>safely(()=>api('release_history'));
   $('check-update').onclick=()=>safely(async()=>{$('check-update').disabled=true;$('update-check-status').textContent='正在检查…';try{const result=await api('check_update',true);$('update-check-status').textContent=result.error||(result.available?'发现新版本':'已是最新版本');if(result.available){$('settings-dialog').close();showUpdate(result);}}finally{$('check-update').disabled=false;}});
   $('later-update').onclick=()=>$('update-dialog').close();$('skip-update').onclick=()=>safely(async()=>{await api('settings',{skipped_version:state.update.version});$('update-dialog').close();});$('install-update').onclick=()=>safely(installUpdate);$('update-dialog').oncancel=event=>{if(state.update?.mandatory||$('install-update').disabled)event.preventDefault();};
   $('sidebar').ondragover=event=>{event.preventDefault();$('sidebar').classList.add('drag-over');};$('sidebar').ondragleave=()=>$('sidebar').classList.remove('drag-over');$('sidebar').ondrop=event=>{event.preventDefault();$('sidebar').classList.remove('drag-over');for(const file of event.dataTransfer.files){const path=file.pywebviewFullPath||file.path;if(path)safely(()=>addFolder(path));}};
-  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
+  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
   await renderTree();if(boot.state.current&&state.roots.length)await openFolder(boot.state.current);
 }
 document.addEventListener('DOMContentLoaded',()=>safely(init));

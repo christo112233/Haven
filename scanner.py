@@ -14,19 +14,31 @@ def visible(entry):
         return False
 
 
+def media_count(folder):
+    """Count the photos and videos stored directly in a folder."""
+    count = 0
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if visible(entry) and Path(entry.name).suffix.lower() in IMAGES | VIDEOS:
+                    count += 1
+    except OSError:
+        pass
+    return count
+
+
 def children(folder):
+    """Describe a folder for the sidebar tree: its own media count and its subfolders."""
     results = []
     with os.scandir(folder) as entries:
         for entry in entries:
             if entry.is_dir(follow_symlinks=False) and visible(entry):
-                count = 0
-                try:
-                    with os.scandir(entry.path) as nested:
-                        count = sum(1 for item in nested if visible(item) and (item.is_dir(follow_symlinks=False) or Path(item.name).suffix.lower() in IMAGES | VIDEOS))
-                except OSError:
-                    pass
-                results.append({"name": entry.name, "path": entry.path, "count": count})
-    return sorted(results, key=lambda item: item["name"].casefold())
+                results.append({"name": entry.name, "path": entry.path, "count": media_count(entry.path)})
+    return {
+        "path": str(folder),
+        "count": media_count(folder),
+        "children": sorted(results, key=lambda item: item["name"].casefold()),
+    }
 
 
 def scan(folder, recursive=False):

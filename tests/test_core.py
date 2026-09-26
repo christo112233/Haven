@@ -67,6 +67,19 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(list((self.root / ".Haven" / "thumbs").glob("*.webp"))), len(paths))
         self.assertEqual(cache.read_json(self.root / ".Haven" / "owner.json"), {"app": "Haven"})
 
+    def test_sidebar_tree_counts_media_files(self):
+        for index in range(3):
+            self.photo(f"{index}.jpg")
+        self.photo("sub/nested.jpg")
+        (self.root / ".git").mkdir()
+        self.photo(".git/hidden.jpg")
+        listing = scanner.children(self.root)
+        self.assertEqual(listing["path"], str(self.root))
+        # The sidebar shows photos and videos, never folders, so a folder holding
+        # 1400 photos can no longer be reported as "1".
+        self.assertEqual(listing["count"], 3)
+        self.assertEqual([(child["name"], child["count"]) for child in listing["children"]], [("sub", 1)])
+
     def test_desktop_window_actions(self):
         with patch("config.STATE_PATH", self.root / "settings.json"):
             api = Api()

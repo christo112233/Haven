@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-datas = [('web', 'web'), ('version.txt', '.')]
+datas = [('web', 'web'), ('version.txt', '.'), ('logo.ico', '.')]
 binaries = []
 hiddenimports = []
 for package in ('webview', 'pillow_heif', 'rawpy', 'imageio_ffmpeg'):

@@ -209,7 +209,7 @@ class Api:
             cache.clean(current)
             count += 1
             if recursive:
-                stack.extend(Path(child["path"]) for child in scanner.children(current))
+                stack.extend(Path(child["path"]) for child in scanner.children(current)["children"])
         return {"count": count}
 
     def file_action(self, path, action, confirmed=False):

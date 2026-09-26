@@ -6,7 +6,7 @@ import threading
 import time
 
 from api import Api
-from config import APP_DIR
+from config import APP_DIR, RESOURCE_DIR
 from server import start, METHODS
 
 
@@ -61,7 +61,9 @@ def main():
                     api.emit("update", result)
         threading.Thread(target=auto_check, daemon=True).start()
     window.events.loaded += loaded
-    webview.start(gui="edgechromium", storage_path=str(profile), private_mode=False)
+    # The frameless window has no OS title bar, so the taskbar/title icon comes from this file.
+    icon = RESOURCE_DIR / "logo.ico"
+    webview.start(gui="edgechromium", storage_path=str(profile), private_mode=False, icon=str(icon) if icon.is_file() else None)
     server.shutdown()
     api.pool.shutdown(wait=False, cancel_futures=True)
     api.raw_pool.shutdown(wait=False, cancel_futures=True)
