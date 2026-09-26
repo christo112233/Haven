@@ -1,0 +1,9 @@
+pywebview==6.2.1
+Pillow==12.3.0
+pillow-heif==1.8.0
+rawpy==0.27.1
+numpy==2.5.3
+imageio-ffmpeg==0.6.0
+packaging==26.3
+Send2Trash==2.1.0
+PyInstaller==6.22.3

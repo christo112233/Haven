@@ -1,0 +1,36 @@
+name: Windows Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          architecture: x64
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: ./scripts/build.ps1
+        shell: pwsh
+      - name: Verify release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python scripts/release_manifest.py '${{ github.ref_name }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haven-win64
+          path: |
+            dist/Haven-win64.zip
+            dist/update.json
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          generate_release_notes: true
+          files: |
+            dist/Haven-win64.zip
+            dist/update.json

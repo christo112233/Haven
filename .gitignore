@@ -1,6 +1,5 @@
 # 虚拟环境
 venv/
-.venv/
 
 # 缓存
 __pycache__/
@@ -10,3 +9,12 @@ __pycache__/
 
 # 日志、临时文件
 *.log
+.reference-liquid-glass/
+.haven-runtime/
+.updates/
+haven-settings.json
+build/
+dist/
+.qa/
+node_modules/
+updater.spec
