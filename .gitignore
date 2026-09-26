@@ -18,3 +18,4 @@ dist/
 .qa/
 node_modules/
 updater.spec
+.reference-amir-liquid-glass/

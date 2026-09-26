@@ -14,6 +14,10 @@ uniform float u_activity;
 uniform float u_time;
 uniform float u_strength;
 uniform float u_blur;
+uniform float u_glow;
+uniform float u_opacity;
+uniform float u_cursor;
+uniform float u_cursor_contrast;
 
 // Upstream SDF helpers use these names. Shape composition is handled by the UI.
 const float u_dpr = 1.0;
@@ -33,7 +37,9 @@ float distanceToGlass(vec2 p) {
     float shape = roundedRectSDF(p, u_rect.xy, u_rect.z, u_rect.w, u_radius, 2.6);
     if (u_trail.z > 0.0) {
         float trailingShape = roundedRectSDF(p, u_trail.xy, u_trail.z, u_trail.w, u_trail.w * 0.5, 2.6);
-        shape = smin(shape, trailingShape, 7.0);
+        // The reference library uses a 24px group blend so nearby glass
+        // silhouettes form a visible neck instead of two touching rims.
+        shape = smin(shape, trailingShape, 24.0);
     }
     return shape;
 }
@@ -81,8 +87,11 @@ void main() {
     float rim = exp(-depth * 2.4);
     vec3 fresnelLCH = SRGB_TO_LCH(mix(color, vec3(0.86, 0.97, 1.0), 0.25));
     fresnelLCH.x = min(115.0, fresnelLCH.x + 55.0);
-    color = mix(color, clamp(LCH_TO_SRGB(fresnelLCH), 0.0, 1.0), fresnel * 0.3);
-    color = mix(color, vec3(0.92, 0.985, 1.0), rim * (0.25 + glare * 0.75));
-    color += vec3(0.055, 0.08, 0.1) * glare * exp(-depth / 3.0) * u_activity;
-    fragColor = vec4(color, coverage);
+    color = mix(color, clamp(LCH_TO_SRGB(fresnelLCH), 0.0, 1.0), fresnel * mix(0.3, 0.12, u_cursor) * u_glow);
+    color = mix(color, vec3(0.92, 0.985, 1.0), rim * mix(0.25 + glare * 0.75, 0.08 + glare * 0.3, u_cursor) * u_glow);
+    color += vec3(0.055, 0.08, 0.1) * glare * exp(-depth / 3.0) * u_activity * u_glow;
+    float glint = pow(max(0.0, dot(normal, normalize(vec2(-0.75, -0.66)))), 8.0) * exp(-depth * 1.25);
+    color = mix(color, vec3(0.95, 0.99, 1.0), glint * 0.26 * u_cursor);
+    color = mix(color, vec3(0.07, 0.31, 0.43), rim * 0.48 * u_cursor_contrast);
+    fragColor = vec4(color, coverage * u_opacity);
 }

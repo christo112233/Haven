@@ -114,28 +114,6 @@ venv\Scripts\python.exe main.py --folder "D:\Photos"
 | `.gitignore` | 排除虚拟环境、Python 缓存、构建产物、用户设置、运行时数据及本地验证资料。 |
 | `README.md` | 安装、开发、架构、打包、发布与更新维护说明。 |
 
-### 自动生成的文件与目录
-
-以下项目不是需要手工维护的源码：
-
-| 路径 | 用途与处理方式 |
-| --- | --- |
-| `venv/` | 本机开发环境。保留供运行/打包使用；需要重建时，关闭使用该环境的进程后重新安装依赖。 |
-| `__pycache__/`、`*.pyc` | Python 字节码缓存，可删除，下次运行会重新生成。 |
-| `build/` | PyInstaller 中间文件与构建警告，可删除后重新构建。 |
-| `updater.spec` | 构建独立更新器时自动生成的 PyInstaller 配置；当前以 `build.ps1` 中的参数为准，不需要手工维护。 |
-| `dist/Haven/` | 可直接运行的完整应用目录，包括 `Haven.exe`、`_internal/`、`updater.exe` 等。 |
-| `dist/helper/` | 独立更新器的中间输出位置，最终 EXE 会复制到 `dist/Haven/`。 |
-| `dist/Haven-win64.zip` | 面向用户和自动更新器的完整发布包。 |
-| `dist/update.json` | 与上述 ZIP 配套的版本、下载地址、大小、SHA256 和更新提示清单。 |
-| `haven-settings.json` | 程序目录内的个人设置，不发布到 GitHub；删除后会重置根目录、主题等设置。 |
-| `.haven-runtime/` | 程序目录内的 WebView2 数据；关闭 Haven 后可清理，下次运行会重新生成。 |
-| `.updates/` | 下载包、更新计划、独立更新器副本、旧版备份及可能的错误日志；关闭程序并确认更新正常后再清理。 |
-| `.qa/` | 本地验证使用的照片/RAW 样本、Playwright 依赖、截图和日志，不进入发布包。 |
-| `.reference-liquid-glass/` | 开发时下载的完整参考仓库，不直接参与运行或打包；所需着色器已复制到 `web/`，删除此参考目录不会影响运行。 |
-| `.git/` | Git 版本历史与仓库元数据，不属于应用运行文件。 |
-
-照片目录内的 `.Haven/` 是媒体缓存，与上面的程序目录和构建目录分开，详见下一节。
 
 ## 数据位置
 
@@ -209,20 +187,6 @@ Stop-Process -Id $qaServer.Id
 
 这些 Node.js 工具仅用于开发验证，应用和发布包均不依赖 Node.js。脚本会添加测试图库并切换主题等设置，建议在独立的开发目录中运行；结束后可在 Haven 侧边栏移除测试根目录。
 
-### 独立液态玻璃预览与验证
-
-使用前面准备的 245 项测试图库，启动独立预览服务，避免修改根目录的个人设置：
-
-```powershell
-$qaPython = Join-Path (Get-Location) 'venv\Scripts\python.exe'
-$glassServer = Start-Process -FilePath $qaPython -ArgumentList @('scripts\preview_ui.py', '--port', '8877') -WindowStyle Hidden -RedirectStandardOutput '.qa\glass-server.log' -RedirectStandardError '.qa\glass-server-error.log' -PassThru
-node scripts\verify_glass.cjs
-Stop-Process -Id $glassServer.Id
-```
-
-先确认端口未被占用。打开 `.qa/glass-server.log` 内的完整 URL 可交互查看效果；测试截图写入 `.qa/liquid-*.png`。验证脚本还会启动一个禁用 WebGL 的浏览器，确认 CSS 回退可用。渲染像素检查使用 Playwright 的软件 WebGL，实际桌面性能还应在 WebView2 与目标显卡上检查。
-
-200 项以上使用虚拟网格，后端每页最多 200 项；IntersectionObserver 加载附近缩略图。后台线程并发生成常规图片与视频，独立进程处理 RAW，进度通过 pywebview 事件推送并由分页轮询补充。
 
 ## 本地打包
 

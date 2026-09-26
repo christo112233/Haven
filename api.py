@@ -42,6 +42,7 @@ class Api:
         self.state.setdefault("auto_update", True)
         self.state.setdefault("theme", "dark")
         self.state.setdefault("thumb_size", 240)
+        self.state.setdefault("glass_transparency", 0.24)
         # Older states could store a folder and its own subfolder as separate roots.
         if self._merge_roots():
             try:
@@ -84,7 +85,7 @@ class Api:
         return {"ok": True}
 
     def settings(self, changes):
-        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive"}
+        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency"}
         with self.lock:
             self.state.update({key: value for key, value in changes.items() if key in allowed})
             try:

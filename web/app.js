@@ -8,7 +8,7 @@ const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
 const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' : value >= 1024**2 ? (value / 1024**2).toFixed(1) + ' MB' : Math.max(1, Math.round(value / 1024)) + ' KB';
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
-let toastTimer, searchTimer, pollTimer, themeTimer, renderScheduled = false;
+let toastTimer, searchTimer, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false;
 async function api(method, ...args) {
   if (window.pywebview?.api) return window.pywebview.api[method](...args);
   const response = await fetch('/api/' + method, {method:'POST', headers:{'Content-Type':'application/json','X-Haven-Token':window.HAVEN_TOKEN}, body:JSON.stringify(args)});
@@ -77,16 +77,48 @@ function theme(value) {
   const root = document.documentElement;
   $('theme-select').value = value;
   syncSelect('theme-select');
-  if (root.dataset.theme !== value) {
-    // Fade colours and the WebGL backdrop into each other instead of snapping between themes.
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      root.classList.add('theme-switching');
-      clearTimeout(themeTimer);
-      themeTimer = setTimeout(() => root.classList.remove('theme-switching'), 620);
+  if ((themeTarget || root.dataset.theme) !== value) {
+    themeTarget = value;
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      themeTransition?.skipTransition();
+      const sequence = ++themeSequence;
+      themeTransition = document.startViewTransition(() => {
+        if (sequence !== themeSequence) return;
+        root.classList.add('theme-capture');
+        root.dataset.theme = value;
+        window.havenGlass?.setThemeInstant?.();
+      });
+      const complete = () => { if (sequence === themeSequence) { root.classList.remove('theme-capture'); themeTransition = null; themeTarget = null; } };
+      themeTransition.finished.then(complete, complete);
+    } else {
+      root.dataset.theme = value;
+      themeTarget = null;
     }
-    root.dataset.theme = value;
   }
   safely(() => api('settings', {theme:value}));
+}
+function setGlassTransparency(value) {
+  const ratio = Math.max(0, Math.min(1, Number(value) || 0));
+  const percent = Math.round(ratio * 100);
+  document.documentElement.style.setProperty('--glass-transparency', ratio.toFixed(2));
+  document.documentElement.style.setProperty('--glass-alpha-factor', (1 - ratio).toFixed(2));
+  const input = $('glass-transparency');
+  const output = $('glass-transparency-value');
+  if (input) input.value = String(percent);
+  if (output) output.textContent = `${percent}%`;
+  window.havenGlass?.setTransparency?.(ratio);
+}
+function ensureTransparencyControl(initial) {
+  const dialog = $('settings-dialog');
+  if (!dialog || $('glass-transparency')) return;
+  const row = document.createElement('div');
+  row.className = 'settings-row transparency-row';
+  row.innerHTML = '<label for="glass-transparency">\u6db2\u6001\u73bb\u7483\u900f\u660e\u5ea6</label><div class="transparency-control"><input id="glass-transparency" type="range" min="0" max="100" step="1" aria-label="\u6db2\u6001\u73bb\u7483\u900f\u660e\u5ea6"><output id="glass-transparency-value" for="glass-transparency"></output></div>';
+  dialog.querySelector('.dialog-heading')?.after(row);
+  const input = $('glass-transparency');
+  input.oninput = event => setGlassTransparency(Number(event.target.value) / 100);
+  input.onchange = () => safely(() => api('settings', {glass_transparency: Number(input.value) / 100}));
+  setGlassTransparency(initial);
 }
 async function addFolder(path) {
   if (!path && !state.desktop) { $('path-dialog').showModal(); $('folder-path').focus(); return; }
@@ -129,16 +161,33 @@ async function renderTree() {
     row.classList.toggle('active', item.path === state.folder);
     row.style.paddingLeft = (item.depth * 12) + 'px';
     row.querySelector('.tree-expand').classList.toggle('expanded', state.expanded.has(item.path));
+    row.querySelector('.tree-expand').setAttribute('aria-expanded', String(state.expanded.has(item.path)));
     row.querySelector('small').textContent = item.count > 0 ? number.format(item.count) : '';
     return row;
   });
+  const animateTree = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const entering = animateTree ? rows.filter(row => row.parentNode !== tree) : [];
   const keep = new Set(plan.map(item => item.path));
-  for (const row of [...tree.children]) if (!keep.has(row.dataset.path)) { state.rows.delete(row.dataset.path); row.remove(); }
-  // Place rows from the bottom up: each row is inserted before the next one, which already sits
-  // in the tree by then. Placing top-down would move parents behind the children they gained.
+  for (const row of [...tree.children]) if (!keep.has(row.dataset.path) && !row.dataset.leaving) {
+    state.rows.delete(row.dataset.path);
+    if (!animateTree) { row.remove(); continue; }
+    const height = row.getBoundingClientRect().height;
+    const opacity = Number(getComputedStyle(row).opacity);
+    row.getAnimations().forEach(animation => animation.cancel());
+    row.dataset.leaving = 'true'; row.style.pointerEvents = 'none'; row.style.overflow = 'hidden';
+    row.animate([{height:`${height}px`,margin:'4px 0',opacity,transform:'translateY(0)'},{height:'0px',margin:'0',opacity:0,transform:'translateY(-5px)'}],{duration:220,easing:'ease-in-out',fill:'forwards'}).finished.then(() => row.remove(), () => row.remove());
+  }
+  // Ignore departing rows when checking order so survivors stay put while children shrink away.
   for (let index = rows.length - 1; index >= 0; index--) {
     const row = rows[index], next = rows[index + 1] || null;
-    if (row.parentNode !== tree || row.nextSibling !== next) tree.insertBefore(row, next);
+    let following = row.nextElementSibling;
+    while (following?.dataset.leaving) following = following.nextElementSibling;
+    if (row.parentNode !== tree || following !== next) tree.insertBefore(row, next);
+  }
+  for (const row of entering) {
+    row.style.overflow = 'hidden';
+    const animation=row.animate([{height:'0px',margin:'0',opacity:0,transform:'translateY(-8px)'},{height:'42px',margin:'4px 0',opacity:1,transform:'translateY(0)'}],{duration:300,easing:'cubic-bezier(.18,.85,.25,1)',fill:'both'});
+    animation.finished.then(() => { animation.cancel(); row.style.overflow = ''; }, () => { if (!row.dataset.leaving) row.style.overflow = ''; });
   }
   icons(tree);
 }
@@ -286,7 +335,7 @@ function closeViewer(){$('viewer-video').pause();$('viewer').close();}
 function showUpdate(result){if(!result.available)return;state.update=result.manifest;const data=state.update;$('update-version').textContent=`新版本 ${data.version}`;$('update-notes').textContent=data.notes||'新版本已发布';$('update-size').textContent=bytes(data.size);$('skip-update').hidden=!!data.mandatory;$('later-update').hidden=!!data.mandatory;$('download-progress').hidden=true;$('download-status').textContent='';$('install-update').disabled=false;if(!$('update-dialog').open)$('update-dialog').showModal();}
 async function installUpdate(){await api('install_update',true);$('install-update').disabled=true;$('skip-update').disabled=true;$('later-update').disabled=true;$('download-progress').hidden=false;const poll=async()=>{const progress=await api('update_progress');$('download-progress').value=progress.progress||0;$('download-status').textContent=progress.state==='error'?progress.error:progress.state==='restarting'?'正在重启…':`正在下载 ${progress.progress||0}%`;if(progress.state==='downloading')setTimeout(()=>safely(poll),500);else if(progress.state==='error'){$('install-update').disabled=false;$('skip-update').disabled=false;$('later-update').disabled=false;}};await poll();}
 async function init(){
-  icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;syncSelect('theme-select');$('thumb-size').value=state.size;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;
+  icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;syncSelect('theme-select');$('thumb-size').value=state.size;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;ensureTransparencyControl(Number.isFinite(Number(boot.state.glass_transparency))?Number(boot.state.glass_transparency):.24);
   $('window-controls').hidden=!state.desktop;
   $('resize-grip').hidden=!state.desktop;
   $('window-controls').onclick=event=>{const button=event.target.closest('[data-window-action]');if(button)safely(()=>api('window_action',button.dataset.windowAction));};
@@ -307,7 +356,7 @@ async function init(){
   $('path-form').onsubmit=event=>{event.preventDefault();safely(async()=>{await addFolder($('folder-path').value.trim());$('path-dialog').close();});};
   $('refresh').onclick=()=>{state.children.clear();state.counts.clear();safely(async()=>{await renderTree();if(state.folder)await openFolder(state.folder);});};
   $('up-folder').onclick=()=>safely(async()=>{if(!state.folder)return;const parent=state.folder.replace(/[\\/][^\\/]+[\\/]?$/,'');if(parent&&parent!==state.folder)await openFolder(parent);});
-  $('theme-button').onclick=()=>theme(document.documentElement.dataset.theme==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
+  $('theme-button').onclick=()=>theme((themeTarget||document.documentElement.dataset.theme)==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
   $('search').oninput=event=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=event.target.value;safely(reloadFilter);},200);};
   $('filters').onclick=event=>{const button=event.target.closest('[data-kind]');if(!button)return;state.kind=button.dataset.kind;for(const tab of $('filters').children)tab.setAttribute('aria-selected',tab===button);safely(reloadFilter);};
   $('sort').onchange=event=>{state.sort=event.target.value;safely(reloadFilter);};$('sort-direction').onclick=()=>{state.descending=!state.descending;$('sort-direction').style.transform=state.descending?'rotate(180deg)':'';safely(reloadFilter);};
@@ -320,7 +369,16 @@ async function init(){
   $('info-button').onclick=()=>{$('details').hidden=!$('details').hidden;};
   $('reveal').onclick=()=>safely(()=>api('file_action',state.current.path,'reveal'));$('copy-path').onclick=()=>safely(async()=>{await api('file_action',state.current.path,'copy');toast('路径已复制');});$('system-open').onclick=()=>safely(()=>api('file_action',state.current.path,'open'));$('trash').onclick=()=>safely(()=>trashItem(state.current));
   $('live-play').onclick=()=>{const video=$('viewer-video');$('viewer-image').hidden=true;video.hidden=false;video.src=state.current.live_path?mediaURL({path:state.current.live_path},'original'):mediaURL(state.current,'motion');video.play().catch(()=>{});};
-  $('viewer-stage').onwheel=event=>{if($('viewer-image').hidden)return;event.preventDefault();state.scale=Math.max(.1,Math.min(20,state.scale*Math.exp(-event.deltaY*.001)));transform();};
+  $('viewer-stage').onwheel=event=>{
+    if($('viewer-image').hidden)return;
+    event.preventDefault();
+    const image=$('viewer-image'),bounds=image.getBoundingClientRect();
+    const next=Math.max(.1,Math.min(20,state.scale*Math.exp(-event.deltaY*.001)));
+    const ratio=next/state.scale;
+    state.x+=(event.clientX-bounds.left-bounds.width/2)*(1-ratio);
+    state.y+=(event.clientY-bounds.top-bounds.height/2)*(1-ratio);
+    state.scale=next;transform();
+  };
   let drag=null;$('viewer-image').onpointerdown=event=>{drag={x:event.clientX,y:event.clientY,baseX:state.x,baseY:state.y};event.currentTarget.setPointerCapture(event.pointerId);event.currentTarget.classList.add('dragging');};$('viewer-image').onpointermove=event=>{if(!drag)return;state.x=drag.baseX+event.clientX-drag.x;state.y=drag.baseY+event.clientY-drag.y;transform();};$('viewer-image').onpointerup=$('viewer-image').onpointercancel=()=>{drag=null;$('viewer-image').classList.remove('dragging');};
   document.addEventListener('keydown',event=>{
     if(!$('viewer').open||event.target.closest('input,select')||$('confirm-dialog').open)return;
