@@ -1,12 +1,13 @@
 from pathlib import Path
 import sys
 
-VERSION = "1.0.1"
+VERSION = "2.0.0"
 CACHE_VERSION = 1
 CACHE_NAME = ".Haven"
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
 STATE_PATH = APP_DIR / "haven-settings.json"
+METADATA_DB_PATH = APP_DIR / "haven-metadata.sqlite3"
 RAW = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".orf", ".rw2", ".pef", ".srw"}
 HEIC = {".heic", ".heif"}
 IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"} | RAW | HEIC

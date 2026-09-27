@@ -212,6 +212,9 @@
       const candidates=surfaceNodes.filter(node=>node.tagName==='BUTTON'||node.classList.contains('tree-row'));
       if(!root)candidates.push(...document.querySelectorAll('#filters button'));
       for(const node of candidates) {
+        // The filter popover is a DOM layer above the shared WebGL canvas.
+        // Keep its pointer cursor in the DOM so it cannot be painted underneath the panel.
+        if(node.closest('#metadata-filter'))continue;
         if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
         const distance=distanceToBounds(node.getBoundingClientRect());
         if(distance<mergeDistance){mergeTarget=node;mergeDistance=distance;}

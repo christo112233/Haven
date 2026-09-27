@@ -13,6 +13,7 @@ __pycache__/
 .haven-runtime/
 .updates/
 haven-settings.json
+haven-metadata.sqlite3*
 build/
 dist/
 .qa/

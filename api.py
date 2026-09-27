@@ -10,6 +10,7 @@ from send2trash import send2trash
 import cache
 import config
 import metadata
+import metadata_store
 import scanner
 import thumbs
 
@@ -43,6 +44,7 @@ class Api:
         self.state.setdefault("theme", "dark")
         self.state.setdefault("thumb_size", 240)
         self.state.setdefault("glass_transparency", 0.24)
+        self.store = metadata_store.MetadataStore(config.METADATA_DB_PATH)
         # Older states could store a folder and its own subfolder as separate roots.
         if self._merge_roots():
             try:
@@ -197,6 +199,8 @@ class Api:
         with self.scan_lock:
             try:
                 items, warnings = scanner.scan(folder, recursive)
+                self.store.reconcile(items)
+                self.store.enrich(items)
                 if job.get("cancelled"):
                     return
                 with self.lock:
@@ -239,12 +243,13 @@ class Api:
             except Exception as exc:
                 job.update(state="error", error=str(exc))
 
-    def page(self, job_id, offset=0, limit=200, query="", kind="all", sort="name", descending=False):
+    def page(self, job_id, offset=0, limit=200, query="", kind="all", sort="name", descending=False, filters=None):
         with self.lock:
             job = self.jobs.get(job_id)
             if not job:
                 raise ValueError("浏览任务已失效")
-            items = [dict(item) for item in job["items"] if query.casefold() in item["name"].casefold() and (kind == "all" or (kind == "image" and item["kind"] != "video") or item["kind"] == kind)]
+            filters = filters or {}
+            items = [dict(item) for item in job["items"] if query.casefold() in item["name"].casefold() and (kind == "all" or (kind == "image" and item["kind"] != "video") or item["kind"] == kind) and self._matches_filters(item, filters)]
             key = sort if sort in {"name", "date", "mtime", "size", "ext"} else "name"
             items.sort(key=lambda item: (str(item[key]).casefold() if key in {"name", "ext"} else item[key], item["path"]), reverse=descending)
             offset = max(0, int(offset))
@@ -252,12 +257,124 @@ class Api:
             result.update(items=items[offset:offset + min(200, max(1, int(limit)))], filtered=len(items))
             return result
 
+    @staticmethod
+    def _matches_filters(item, filters):
+        tags = {str(tag).casefold() for tag in item.get("tags", [])}
+        wanted_tags = {str(tag).casefold() for tag in filters.get("tags", [])}
+        if wanted_tags and not wanted_tags.issubset(tags):
+            return False
+        excluded_tags = {str(tag).casefold() for tag in filters.get("tags_not", [])}
+        if excluded_tags & tags:
+            return False
+        if "color_label" in filters and filters["color_label"] and item.get("color_label") != filters["color_label"]:
+            return False
+        for key in ("favorite", "flagged", "rejected"):
+            if key in filters and filters[key] is not None and bool(item.get(key)) != bool(filters[key]):
+                return False
+        if "rating" in filters:
+            rating = item.get("rating")
+            value = filters.get("rating")
+            operator = filters.get("rating_op", "=")
+            if value == "unrated" or operator == "is_empty":
+                if rating is not None:
+                    return False
+            elif rating is None or not isinstance(value, int):
+                return False
+            elif operator == ">=" and rating < value or operator == "<=" and rating > value or operator == "=" and rating != value:
+                return False
+        return True
+
     def media_item(self, path):
         actual = self.authorize(path)
         if not actual.is_file() or actual.suffix.lower() not in config.IMAGES | config.VIDEOS:
             raise ValueError("不是受支持的媒体文件")
         stat = actual.stat()
         return {"path": str(actual), "ext": actual.suffix.lower(), "signature": f"{stat.st_mtime_ns}:{stat.st_size}"}
+
+    def photo_metadata(self, paths):
+        authorized = [str(self.authorize(path)) for path in paths]
+        return self.store.metadata_for_paths(authorized)
+
+    def update_photo_metadata(self, paths, patch):
+        authorized = [str(self.authorize(path)) for path in paths]
+        result = self.store.update(authorized, patch)
+        by_path = {metadata_store.normalize_path(path): value for path, value in result["metadata"].items()}
+        with self.lock:
+            for job in self.jobs.values():
+                for item in job.get("items", []):
+                    value = by_path.get(metadata_store.normalize_path(item.get("path", "")))
+                    if value:
+                        item.update(value)
+        return result
+
+    def list_tags(self):
+        return self.store.list_tags()
+
+    def list_smart_albums(self):
+        return self.store.smart_albums()
+
+    def create_smart_album(self, name, definition):
+        return self.store.save_smart_album(name, definition)
+
+    def update_smart_album(self, album_id, name, definition):
+        return self.store.save_smart_album(name, definition, album_id)
+
+    def delete_smart_album(self, album_id):
+        self.store.delete_smart_album(album_id)
+        return {"ok": True}
+
+    def open_smart_album(self, album_id):
+        album = self.store.get_smart_album(album_id)
+        job_id = uuid.uuid4().hex
+        job = {"id": job_id, "path": f"smart:{album_id}", "state": "scanning", "items": [], "done": 0, "total": 0, "warnings": [], "revision": 0, "smart_album": album}
+        with self.lock:
+            for previous in self.jobs.values():
+                previous["cancelled"] = True
+            self.jobs = {job_id: job}
+        threading.Thread(target=self._scan_smart, args=(job, album), daemon=True).start()
+        return {"job": job_id}
+
+    def _scan_smart(self, job, album):
+        with self.scan_lock:
+            try:
+                items, warnings = [], []
+                for root in self.state.get("roots", []):
+                    found, extra = scanner.scan(Path(root), True)
+                    items.extend(found); warnings.extend(extra)
+                self.store.reconcile(items)
+                self.store.enrich(items)
+                definition = album.get("definition", {})
+                logic = definition.get("logic", "and").lower()
+                conditions = definition.get("conditions", [])
+                def matches(item):
+                    values = [self._matches_filters(item, self._condition_filter(condition)) for condition in conditions]
+                    return any(values) if logic == "or" else all(values)
+                items = [item for item in items if matches(item)]
+                processed = []
+                for item in items:
+                    if job.get("cancelled"):
+                        return
+                    processed.append(process_item(item))
+                items = processed
+                with self.lock:
+                    job.update(items=items, total=len(items), done=len(items), warnings=warnings, state="ready")
+            except Exception as exc:
+                job.update(state="error", error=str(exc))
+
+    @staticmethod
+    def _condition_filter(condition):
+        field = condition.get("field")
+        operator = condition.get("operator", "=")
+        value = condition.get("value")
+        if field == "tags":
+            return {"tags": [value]} if operator in {"contains", "="} else {"tags_not": [value]}
+        if field == "rating":
+            return {"rating": "unrated" if operator == "is_empty" else value, "rating_op": operator}
+        if field == "color_label":
+            return {"color_label": value}
+        if field in {"favorite", "flagged", "rejected"}:
+            return {field: bool(value)}
+        return {}
 
     def clean_cache(self, path, recursive=False):
         folder = self.authorize(path)
@@ -278,10 +395,8 @@ class Api:
         relative = os.path.relpath(value, old)
         return str(Path(new) if relative == os.curdir else Path(new) / relative)
 
-    def rename(self, path, name):
-        actual = self.authorize(path)
-        if actual.name.casefold() == cache.CACHE_NAME.casefold():
-            raise PermissionError("不能重命名 Haven 缓存目录")
+    @staticmethod
+    def _validate_entry_name(name):
         if not isinstance(name, str) or not name or not name.strip():
             raise ValueError("名称不能为空")
         if name in {".", ".."} or "/" in name or "\\" in name:
@@ -293,6 +408,37 @@ class Api:
         stem = name.split(".", 1)[0].upper()
         if stem in {"CON", "PRN", "AUX", "NUL"} or stem.startswith(("COM", "LPT")) and stem[3:].isdigit() and 1 <= int(stem[3:]) <= 9:
             raise ValueError("名称是 Windows 保留名称")
+        return name
+
+    @staticmethod
+    def _clear_file_cache(path):
+        cache_root = cache.directory(path.parent, False)
+        for folder_name, suffix in (("thumbs", ".webp"), ("previews", ".jpg")):
+            target = cache_root / folder_name / (path.name + suffix)
+            signature = target.with_suffix(target.suffix + ".json")
+            for artifact in (target, signature):
+                try:
+                    artifact.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def create_folder(self, parent, name):
+        folder = self.authorize(parent)
+        if not folder.is_dir():
+            raise ValueError("目标不是文件夹")
+        if any(part.casefold() == cache.CACHE_NAME.casefold() for part in folder.parts):
+            raise PermissionError("不能在 Haven 缓存目录中创建文件夹")
+        target = folder / self._validate_entry_name(name)
+        if target.exists():
+            raise FileExistsError("目标名称已经存在")
+        target.mkdir()
+        return {"path": str(target), "parent": str(folder), "name": target.name}
+
+    def rename(self, path, name):
+        actual = self.authorize(path)
+        if actual.name.casefold() == cache.CACHE_NAME.casefold():
+            raise PermissionError("不能重命名 Haven 缓存目录")
+        self._validate_entry_name(name)
         destination = actual.with_name(name)
         if destination == actual or destination.name.casefold() == actual.name.casefold():
             return {"path": str(actual), "name": actual.name, "old_path": str(actual), "roots": self.state["roots"], "expanded": self.state.get("expanded", []), "current": self.state.get("current", "")}
@@ -302,23 +448,37 @@ class Api:
         was_directory = actual.is_dir()
         actual.rename(destination)
         if was_directory:
+            self.store.rename_prefix(old_path, new_path)
             self.state["roots"] = [self._renamed_path(root, old_path, new_path) for root in self.state["roots"]]
             self.state["expanded"] = sorted({self._renamed_path(folder, old_path, new_path) for folder in self.state.get("expanded", [])})
             self.state["current"] = self._renamed_path(self.state.get("current", ""), old_path, new_path)
             self.settings({})
         else:
-            # A renamed file has a different cache key. Remove only its old
-            # generated artifacts; the next scan will create the new ones.
-            cache_root = cache.directory(actual.parent, False)
-            for folder_name, suffix in (("thumbs", ".webp"), ("previews", ".jpg")):
-                target = cache_root / folder_name / (actual.name + suffix)
-                signature = target.with_suffix(target.suffix + ".json")
-                for artifact in (target, signature):
-                    try:
-                        artifact.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+            self.store.move_path(old_path, new_path)
+            # A renamed file has a different cache key. The next scan creates
+            # the new artifacts under the new name.
+            self._clear_file_cache(actual)
         return {"path": new_path, "name": destination.name, "old_path": old_path, "roots": self.state["roots"], "expanded": self.state.get("expanded", []), "current": self.state.get("current", "")}
+
+    def move_file(self, path, destination):
+        source = self.authorize(path)
+        folder = self.authorize(destination)
+        if not source.is_file() or source.suffix.lower() not in config.IMAGES | config.VIDEOS:
+            raise ValueError("只能移动照片或视频文件")
+        if not folder.is_dir():
+            raise ValueError("目标不是文件夹")
+        if any(part.casefold() == cache.CACHE_NAME.casefold() for part in folder.parts):
+            raise PermissionError("不能移动到 Haven 缓存目录")
+        target = folder / source.name
+        if target == source:
+            return {"path": str(source), "old_parent": str(source.parent), "parent": str(folder), "name": source.name}
+        if target.exists():
+            raise FileExistsError("目标文件夹中已经存在同名文件")
+        source_parent = source.parent
+        source.rename(target)
+        self.store.move_path(str(source), str(target))
+        self._clear_file_cache(Path(source_parent / source.name))
+        return {"path": str(target), "old_parent": str(source_parent), "parent": str(folder), "name": target.name}
 
     def file_action(self, path, action, confirmed=False):
         actual = self.authorize(path)
@@ -331,6 +491,7 @@ class Api:
                 raise ValueError("删除文件需要确认")
             self.media_item(actual)
             send2trash(str(actual))
+            self.store.remove_path(str(actual))
         elif action == "copy":
             import ctypes
             from ctypes import wintypes

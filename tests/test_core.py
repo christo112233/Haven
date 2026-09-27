@@ -84,6 +84,49 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(listing["count"], 3)
         self.assertEqual([(child["name"], child["count"]) for child in listing["children"]], [("sub", 1)])
 
+    def test_photo_metadata_batch_updates_and_path_migration(self):
+        from metadata_store import MetadataStore
+        first, second = self.photo("first.jpg"), self.photo("second.jpg")
+        store = MetadataStore(self.root / "metadata.sqlite3")
+        try:
+            items = [{"path": str(first)}, {"path": str(second)}]
+            store.reconcile(items)
+            result = store.update([str(first), str(second)], {"tags_add": ["家人"], "rating": 4, "favorite": True, "flagged": True, "color_label": "blue"})
+            self.assertEqual(result["count"], 2)
+            values = store.metadata_for_paths([str(first), str(second)])
+            first_key = next(key for key in values if key.casefold() == str(first.resolve()).casefold())
+            self.assertEqual(values[first_key]["rating"], 4)
+            self.assertTrue(values[first_key]["flagged"])
+            self.assertFalse(values[first_key]["rejected"])
+            self.assertEqual(values[first_key]["tags"], ["家人"])
+            store.update([str(first)], {"favorite": False, "flagged": False})
+            cleared = next(iter(store.metadata_for_paths([str(first)]).values()))
+            self.assertFalse(cleared["favorite"])
+            self.assertFalse(cleared["flagged"])
+            renamed = self.root / "renamed.jpg"
+            first.rename(renamed)
+            store.move_path(str(first), str(renamed))
+            moved_values = store.metadata_for_paths([str(renamed)])
+            self.assertEqual(next(iter(moved_values.values()))["rating"], 4)
+            with self.assertRaises(ValueError):
+                store.update([str(renamed)], {"rating": 6})
+        finally:
+            store.close()
+
+    def test_smart_album_definition_and_rating_filter(self):
+        from metadata_store import MetadataStore
+        photo = self.photo("album.jpg")
+        store = MetadataStore(self.root / "metadata.sqlite3")
+        try:
+            store.reconcile([{"path": str(photo)}])
+            store.update([str(photo)], {"rating": 5, "tags_add": ["家人"]})
+            album = store.save_smart_album("Family", {"logic": "and", "conditions": [{"field": "rating", "operator": ">=", "value": 4}, {"field": "tags", "operator": "contains", "value": "家人"}]})
+            self.assertEqual(album["name"], "Family")
+            with self.assertRaises(ValueError):
+                store.save_smart_album("Bad", {"logic": "and", "conditions": [{"field": "rating", "operator": ">=", "value": 9}]})
+        finally:
+            store.close()
+
     def test_rename_file_and_folder_updates_state(self):
         library = self.root / "library"
         library.mkdir()
@@ -111,6 +154,16 @@ class CoreTests(unittest.TestCase):
                 self.assertTrue((trip / "inside.jpg").is_file())
                 self.assertEqual(Path(moved["current"]), trip)
                 self.assertIn(str(trip), moved["expanded"])
+                created = api.create_folder(str(library), "new-folder")
+                self.assertTrue((library / "new-folder").is_dir())
+                self.assertEqual(Path(created["parent"]), library)
+                other = self.photo("library/other.jpg")
+                self.photo("library/trip/other.jpg")
+                with self.assertRaises(FileExistsError):
+                    api.move_file(str(other), str(trip))
+                transferred = api.move_file(str(library / "renamed.jpg"), str(trip))
+                self.assertEqual(Path(transferred["parent"]), trip)
+                self.assertTrue((trip / "renamed.jpg").is_file())
             finally:
                 api.pool.shutdown()
                 api.raw_pool.shutdown()

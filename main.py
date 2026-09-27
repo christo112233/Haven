@@ -74,6 +74,7 @@ def main():
     icon = RESOURCE_DIR / "logo.ico"
     webview.start(gui="edgechromium", storage_path=str(profile), private_mode=False, icon=str(icon) if icon.is_file() else None)
     server.shutdown()
+    api.store.close()
     api.pool.shutdown(wait=False, cancel_futures=True)
     api.raw_pool.shutdown(wait=False, cancel_futures=True)
 
