@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const icons = root => lucide.createIcons({root: root || document, attrs: {'aria-hidden': 'true'}});
-const state = {job: null, folder: '', lastFolder: '', roots: [], expanded: new Set(), children: new Map(), counts: new Map(), rows: new Map(), pages: new Map(), total: 0, kind: 'all', sort: 'name', descending: false, query: '', size: 240, epoch: 0, viewerIndex: 0, current: null, scale: 1, rotation: 0, x: 0, y: 0, desktop: false, update: null, optimisticMoved: new Set(), silentScan: false, metadataFilters: {}, selection: new Set(), selectionMode: false, lastSelectedIndex: null, smartAlbums: [], smartAlbum: null};
+const state = {job: null, folder: '', lastFolder: '', roots: [], expanded: new Set(), children: new Map(), counts: new Map(), rows: new Map(), pages: new Map(), total: 0, kind: 'all', sort: 'name', descending: false, query: '', size: 240, epoch: 0, viewerIndex: 0, current: null, scale: 1, rotation: 0, x: 0, y: 0, desktop: false, update: null, optimisticMoved: new Set(), silentScan: false, metadataFilters: {}, selection: new Set(), selectionMode: false, lastSelectedIndex: null, smartAlbums: [], smartAlbum: null, subfolders: [], subfoldersExpanded: false};
 const number = new Intl.NumberFormat('zh-CN');
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
@@ -9,8 +9,9 @@ const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' :
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
 let toastTimer, searchTimer, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false, renderForcePending = false, detailsCloseTimer;
-let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true;
+let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true, subfolderRequest = 0, subfolderNavigation = 0;
 let moveQueue = Promise.resolve();
+const DRAG_PATH = 'application/x-haven-path', DRAG_PATHS = 'application/x-haven-paths';
 async function api(method, ...args) {
   if (window.pywebview?.api) return window.pywebview.api[method](...args);
   const response = await fetch('/api/' + method, {method:'POST', headers:{'Content-Type':'application/json','X-Haven-Token':window.HAVEN_TOKEN}, body:JSON.stringify(args)});
@@ -214,6 +215,39 @@ async function renderTree() {
   icons(tree);
 }
 async function restoreAfterSmartAlbumDelete() { state.smartAlbum = null; const folder = state.lastFolder || state.roots[0]; if (folder) await openFolder(folder); else resetEmpty(); }
+function renderSubfolders() {
+  const host=$('subfolders'),list=$('subfolders-list'),toggle=$('subfolders-toggle');
+  const children=state.subfolders;
+  host.hidden=!state.folder||Boolean(state.smartAlbum)||!children.length;
+  if(host.hidden){list.replaceChildren();return;}
+  $('subfolders-heading').textContent=`子文件夹 · ${number.format(children.length)}`;
+  host.classList.toggle('is-expanded',state.subfoldersExpanded);
+  list.replaceChildren(...(state.subfoldersExpanded?children:children.slice(0,3)).map(child=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='subfolder-link glass';button.title=child.name;
+    button.setAttribute('aria-label',`打开子文件夹 ${child.name}`);
+    const icon=document.createElement('i');icon.dataset.lucide='folder';
+    const label=document.createElement('span');label.textContent=child.name;
+    button.append(icon,label);
+    button.onclick=()=>safely(()=>openSubfolder(child.path));
+    return button;
+  }));
+  toggle.hidden=children.length<=3;
+  toggle.setAttribute('aria-expanded',String(state.subfoldersExpanded));
+  toggle.querySelector('span').textContent=state.subfoldersExpanded?'收起':`还有 ${number.format(children.length-3)} 个`;
+  icons(list);
+}
+function clearSubfolders(){subfolderRequest++;state.subfolders=[];state.subfoldersExpanded=false;renderSubfolders();}
+async function loadSubfolders(path,epoch=state.epoch){
+  const request=++subfolderRequest;
+  try{
+    const entry=await api('folders',path);
+    if(request!==subfolderRequest||epoch!==state.epoch||!samePath(path,state.folder)||state.smartAlbum)return;
+    state.children.set(path,entry);
+    state.subfolders=entry.children;
+    renderSubfolders();
+  }catch(error){if(request===subfolderRequest&&epoch===state.epoch)toast(error.message||String(error));}
+}
 async function renderSmartAlbums() {
   state.smartAlbums = await api('list_smart_albums');
   const host = $('smart-albums-list');
@@ -223,7 +257,7 @@ async function renderSmartAlbums() {
     row.className = 'smart-album-row'; row.dataset.id = album.id;
     row.innerHTML = '<i data-lucide="sparkles"></i><span></span><small></small><span class="album-actions"><button class="icon-button album-edit" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button><button class="icon-button album-delete" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button></span>';
     row.querySelector('span').textContent = album.name;
-    row.onclick = () => safely(async () => { state.smartAlbum = album.id; document.querySelectorAll('.smart-album-row').forEach(node => node.classList.toggle('active', node === row)); const result = await api('open_smart_album', album.id); state.folder = ''; state.epoch++; state.job = result.job; state.pages.clear(); state.total = 0; $('folder-title').textContent = album.name; $('folder-parent').textContent = '智能相册'; $('folder-summary').textContent = '正在读取'; $('viewport').classList.add('is-loading'); await poll(state.epoch); });
+    row.onclick = () => safely(async () => { subfolderNavigation++; state.smartAlbum = album.id; state.folder = ''; state.epoch++; clearSubfolders(); document.querySelectorAll('.smart-album-row').forEach(node => node.classList.toggle('active', node === row)); const result = await api('open_smart_album', album.id); state.job = result.job; state.pages.clear(); state.total = 0; $('folder-title').textContent = album.name; $('folder-parent').textContent = '智能相册'; $('folder-summary').textContent = '正在读取'; $('viewport').classList.add('is-loading'); await poll(state.epoch); });
     row.querySelector('.album-edit').onclick = event => { event.stopPropagation(); editSmartAlbum(album); };
     row.querySelector('.album-delete').onclick = event => { event.stopPropagation(); safely(async () => { await api('delete_smart_album', album.id); if (state.smartAlbum === album.id) await restoreAfterSmartAlbumDelete(); await renderSmartAlbums(); }); };
     row.oncontextmenu = event => { event.preventDefault(); contextMenu(event, [['trash-2', '删除智能相册', async () => { await api('delete_smart_album', album.id); if (state.smartAlbum === album.id) await restoreAfterSmartAlbumDelete(); await renderSmartAlbums(); }]]); };
@@ -239,22 +273,26 @@ function treeRow(path) {
   row.querySelector('.folder-button').onclick = () => safely(() => openFolder(path));
   row.querySelector('.tree-expand').onclick = () => safely(() => toggleTree(path));
   row.ondragover = event => {
-    if (!event.dataTransfer?.types.includes('application/x-haven-path')) return;
+    if (!event.dataTransfer?.types.includes(DRAG_PATH) && !event.dataTransfer?.types.includes(DRAG_PATHS)) return;
     event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='move';row.classList.add('drop-target');
   };
   row.ondragleave = event => { if (!event.relatedTarget || !row.contains(event.relatedTarget)) row.classList.remove('drop-target'); };
   row.ondrop = event => {
-    if (!event.dataTransfer?.types.includes('application/x-haven-path')) return;
+    if (!event.dataTransfer?.types.includes(DRAG_PATH) && !event.dataTransfer?.types.includes(DRAG_PATHS)) return;
     event.preventDefault();event.stopPropagation();row.classList.remove('drop-target');
-    const source=event.dataTransfer.getData('application/x-haven-path');
-    if(source)safely(()=>queuePhotoMove(source,path));
+    let sources=[];
+    try { sources=JSON.parse(event.dataTransfer.getData(DRAG_PATHS)); } catch (_) {}
+    if(!Array.isArray(sources))sources=[];
+    sources=[...new Set(sources.filter(source=>typeof source==='string'&&source))];
+    if(!sources.length){const source=event.dataTransfer.getData(DRAG_PATH);if(source)sources=[source];}
+    if(sources.length)safely(()=>queuePhotoMoves(sources,path));
   };
   row.oncontextmenu = event => {
     event.preventDefault();
     const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
     actions.unshift(['pencil','重命名',() => renamePath(path,basename(path),true)]);
+    actions.push(['folder-plus','新建子文件夹',() => createChildFolder(path)]);
     if (state.roots.includes(path)) {
-      actions.push(['folder-plus','新建子文件夹',() => createChildFolder(path)]);
       actions.push(['folder-minus','移除根目录', async () => {const saved = await api('remove_folder',path);state.roots = saved.roots;forgetTree(path);await renderTree();if(saved.current) await openFolder(saved.current);else resetEmpty();}]);
     }
     contextMenu(event, actions);
@@ -273,21 +311,36 @@ function updateVisibleSummary(){
   const text=number.format(state.total)+' 个项目'+($('recursive').checked?' · 包含子文件夹':'');
   $('folder-summary').textContent=text;$('status').textContent=number.format(state.total)+' 个项目';
 }
-function queuePhotoMove(source,target){
-  const task=moveQueue.then(()=>movePhotoToFolder(source,target),()=>movePhotoToFolder(source,target));
+function queuePhotoMove(source,target,quiet=false){
+  const task=moveQueue.then(()=>movePhotoToFolder(source,target,quiet),()=>movePhotoToFolder(source,target,quiet));
   moveQueue=task.catch(()=>{});
   return task;
 }
-async function movePhotoToFolder(source,target){
+async function queuePhotoMoves(sources,target){
+  const results=await Promise.allSettled(sources.map(source=>queuePhotoMove(source,target,true)));
+  let moved=0,firstError=null;
+  results.forEach((result,index)=>{
+    if(result.status==='rejected'){firstError ||= result.reason;return;}
+    if(samePath(result.value.path,sources[index]))return;
+    moved++;state.selection.delete(sources[index]);
+  });
+  if(!state.selection.size)state.lastSelectedIndex=null;
+  updateBulkToolbar();scheduleRender();
+  const failed=results.filter(result=>result.status==='rejected').length;
+  if(failed)toast(`已移动 ${moved} 项，${failed} 项失败：${firstError?.message||firstError}`);
+  else toast(moved?`已移动 ${moved} 项到「${basename(target)}」`:'照片已在目标文件夹');
+  return {moved,failed};
+}
+async function movePhotoToFolder(source,target,quiet=false){
   try{
   const result=await api('move_file',source,target);
   const sourceFolder=result.old_parent||parentPath(source),targetFolder=result.parent||target;
-  if(state.folder&&samePath(state.folder,sourceFolder)){
+  if(!samePath(result.path,source)&&state.folder&&samePath(state.folder,sourceFolder)){
     state.optimisticMoved.add(source);
-    for(const items of state.pages.values())if(items.some(item=>samePath(item.path,source))){state.total=Math.max(0,state.total-1);break;}
+    if(state.selection.has(source)||[...state.pages.values()].some(items=>items.some(item=>samePath(item.path,source))))state.total=Math.max(0,state.total-1);
     updateVisibleSummary();scheduleRender();
   }
-  toast(`已移动到「${basename(target)}」`);
+  if(!quiet)toast(`已移动到「${basename(target)}」`);
   return result;
   }catch(error){
     throw error;
@@ -298,7 +351,7 @@ async function createChildFolder(parent){
   if(name===null)return;
   await api('create_folder',parent,name);
   state.expanded.add(parent);await api('settings',{expanded:[...state.expanded]});
-  state.children.clear();state.counts.clear();await renderTree();toast('子文件夹已创建');
+  state.children.clear();state.counts.clear();await renderTree();if(samePath(parent,state.folder))await loadSubfolders(parent);toast('子文件夹已创建');
 }
 function forgetTree(path) {
   for (const key of [...state.children.keys()]) if (key === path || key.startsWith(path + '\\') || key.startsWith(path + '/')) state.children.delete(key);
@@ -308,13 +361,31 @@ function forgetTree(path) {
 }
 function markTreeSelection(path) { for (const [key, row] of state.rows) row.classList.toggle('active', key === path); }
 function resetEmpty() {
-  clearTimeout(pollTimer);state.epoch++;state.job=null;state.folder='';state.pages.clear();state.total=0;state.optimisticMoved.clear();state.silentScan=false;state.smartAlbum=null;state.selection.clear();updateBulkToolbar();
+  clearTimeout(pollTimer);subfolderNavigation++;state.epoch++;state.job=null;state.folder='';state.pages.clear();state.total=0;state.optimisticMoved.clear();state.silentScan=false;state.smartAlbum=null;state.selection.clear();updateBulkToolbar();
+  clearSubfolders();
   state.children.clear();state.counts.clear();state.rows.clear();$('tree').replaceChildren();$('viewport').classList.remove('is-loading');
   $('grid').replaceChildren();$('grid').removeAttribute('style');$('empty').hidden=false;$('empty').querySelector('h2').textContent='打开你的照片文件夹';$('empty-add').hidden=false;
   $('folder-title').textContent='Haven';$('folder-summary').textContent='尚未添加文件夹';$('breadcrumbs').textContent='图库';$('status').textContent='0 个项目';$('scan-progress').hidden=true;
 }
+async function openSubfolder(path){
+  const navigation=++subfolderNavigation;
+  const root=state.roots.find(candidate=>normalizeClientPath(path).startsWith(normalizeClientPath(candidate).replace(/\/+$/,'')+'/'));
+  if(root){
+    for(let folder=parentPath(path);;folder=parentPath(folder)){
+      state.expanded.add(folder);
+      if(samePath(folder,root))break;
+    }
+    await api('settings',{expanded:[...state.expanded]});
+    if(navigation!==subfolderNavigation)return;
+    await renderTree();
+    if(navigation!==subfolderNavigation)return;
+    state.rows.get(path)?.scrollIntoView({block:'nearest'});
+  }
+  if(navigation===subfolderNavigation)await openFolder(path);
+}
 async function openFolder(path,silent=false) {
-  clearTimeout(pollTimer);state.epoch++;state.folder=path;state.lastFolder=path;state.smartAlbum=null;state.selection.clear();updateBulkToolbar();state.job=null;state.silentScan=silent;
+  clearTimeout(pollTimer);subfolderNavigation++;state.epoch++;state.folder=path;state.lastFolder=path;state.smartAlbum=null;state.selection.clear();updateBulkToolbar();state.job=null;state.silentScan=silent;
+  clearSubfolders();void loadSubfolders(path);
   if(!silent){state.pages.clear();state.total=0;state.optimisticMoved.clear();}
   // Keep the previous photos on screen (dimmed) until the new folder is ready, instead of blanking the view.
   if(!silent){
@@ -374,8 +445,8 @@ function card(item,index) {
     state.nodes.set(item.path,node);icons(node);
   }
   node.dataset.index=index;node.title=item.name;node.classList.toggle('selected',state.selection.has(item.path)||(state.current?.path===item.path&&$('viewer')?.open));
-  node.ondragstart=event=>{event.dataTransfer.setData('application/x-haven-path',item.path);event.dataTransfer.effectAllowed='move';node.classList.add('dragging');};
-  node.ondragend=()=>node.classList.remove('dragging');
+  node.ondragstart=event=>{const paths=state.selection.has(item.path)?[...state.selection]:[item.path];event.dataTransfer.setData(DRAG_PATH,item.path);event.dataTransfer.setData(DRAG_PATHS,JSON.stringify(paths));event.dataTransfer.effectAllowed='move';node.classList.add('dragging');if(paths.length>1)node.dataset.dragCount=`${paths.length} 项`;};
+  node.ondragend=()=>{node.classList.remove('dragging');delete node.dataset.dragCount;};
   node.onclick=event=>{if(state.selectionMode||event.ctrlKey||event.metaKey||event.shiftKey){event.preventDefault();toggleCardSelection(item,index,event);return;}safely(()=>showViewer(Number(node.dataset.index)));};
   node.oncontextmenu=event=>{event.preventDefault();contextMenu(event,[['pencil','重命名',()=>renamePath(item.path,item.name,false)],['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['external-link','用默认程序打开',()=>api('file_action',item.path,'open')],['copy','复制路径',()=>api('file_action',item.path,'copy')],['trash-2','移到回收站',()=>trashItem(item)]]);};
   node.oncontextmenu=event=>{event.preventDefault();contextMenu(event,[['star','设置评分',()=>promptRating([item.path])],['heart','收藏',()=>applyMetadata([item.path],{favorite:true})],['flag','旗帜',()=>applyMetadata([item.path],{flagged:true})],['tag','添加标签',()=>promptTags([item.path])],['pencil','重命名',()=>renamePath(item.path,item.name,false)],['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['trash-2','移到回收站',()=>trashItem(item)]]);};
@@ -573,6 +644,7 @@ async function init(){
   $('add-folder').onclick=$('empty-add').onclick=()=>safely(()=>addFolder());
   $('path-form').onsubmit=event=>{event.preventDefault();safely(async()=>{await addFolder($('folder-path').value.trim());$('path-dialog').close();});};
   $('refresh').onclick=()=>{state.children.clear();state.counts.clear();safely(async()=>{await renderTree();if(state.folder)await openFolder(state.folder);});};
+  $('subfolders-toggle').onclick=()=>{state.subfoldersExpanded=!state.subfoldersExpanded;renderSubfolders();};
   $('up-folder').onclick=()=>safely(async()=>{if(!state.folder)return;const parent=state.folder.replace(/[\\/][^\\/]+[\\/]?$/,'');if(parent&&parent!==state.folder)await openFolder(parent);});
   $('theme-button').onclick=()=>theme((themeTarget||document.documentElement.dataset.theme)==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
   $('search').oninput=event=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=event.target.value;safely(reloadFilter);},200);};

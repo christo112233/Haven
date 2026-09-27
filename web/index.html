@@ -46,6 +46,7 @@
       <div class="sort-controls"><button id="selection-mode" class="icon-button" title="选择照片" aria-label="选择照片" aria-pressed="false"><i data-lucide="list-checks"></i></button><button id="metadata-filter-button" class="icon-button" title="筛选" aria-label="筛选"><i data-lucide="list-filter"></i></button><select id="sort" aria-label="排序"><option value="name">文件名</option><option value="date">拍摄时间</option><option value="mtime">修改时间</option><option value="size">文件大小</option><option value="ext">文件类型</option></select><button id="sort-direction" class="icon-button" title="切换升降序" aria-label="切换升降序"><i data-lucide="arrow-down-wide-narrow"></i></button><span id="selection-mode-status" class="selection-mode-status" hidden>选择模式</span></div>
     </section>
     <div id="warning" role="status" hidden></div>
+    <nav id="subfolders" class="subfolders" aria-label="子文件夹" hidden><span id="subfolders-heading" class="subfolders-heading"></span><div id="subfolders-list" class="subfolders-list"></div><button id="subfolders-toggle" class="subfolders-toggle" type="button" aria-expanded="false" hidden><span></span><i data-lucide="chevron-down"></i></button></nav>
     <div id="viewport">
       <div id="empty" class="empty-state"><i data-lucide="images"></i><h2>打开你的照片文件夹</h2><button id="empty-add" class="primary glass"><i data-lucide="folder-plus"></i>添加文件夹</button></div>
       <div id="grid" role="list" aria-label="照片与视频"></div>

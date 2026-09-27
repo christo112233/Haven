@@ -294,7 +294,10 @@
       }
     }
     if(!root){
-      const domLayer=hover?.closest?.('#metadata-filter');
+      const menu=document.getElementById('context-menu');
+      const menuBounds=!menu.hidden&&menu.getBoundingClientRect();
+      const overMenu=menuBounds&&cursorTarget.x>=menuBounds.left-12&&cursorTarget.x<=menuBounds.right+12&&cursorTarget.y>=menuBounds.top-12&&cursorTarget.y<=menuBounds.bottom+12;
+      const domLayer=hover?.closest?.('#metadata-filter')||overMenu;
       cursorElement?.classList.toggle('is-gpu-free',cursorVisible&&!activeDialog&&(!mergedCursor||domLayer));
     }
     const drawCursor = cursorVisible && root && activeDialog===root && !mergedCursor;
