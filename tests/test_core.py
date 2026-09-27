@@ -396,21 +396,45 @@ class CoreTests(unittest.TestCase):
         (target / "Haven.exe").write_text("old executable")
         (target / "version.txt").write_text("0.1.0")
         (target / "haven-settings.json").write_text("my photo folders")
-        package = self.root / "package.zip"
+        work = target / ".updates" / "haven-test"
+        work.mkdir(parents=True)
+        package = work / "package.zip"
         with zipfile.ZipFile(package, "w") as archive:
             archive.writestr("Haven.exe", "new executable")
             archive.writestr("version.txt", "0.2.0")
             archive.writestr("_internal/runtime.txt", "new runtime")
         digest = hashlib.sha256(package.read_bytes()).hexdigest()
         plan = {"target": str(target), "package": str(package), "pid": 12345, "current": "0.1.0", "manifest": {"version": "0.2.0", "size": package.stat().st_size, "sha256": digest}}
-        plan_path = self.root / "plan.json"
+        plan_path = work / "plan.json"
         cache.atomic_json(plan_path, plan)
         with patch("updater_src.updater.wait_for_exit"), patch("updater_src.updater.subprocess.Popen") as launch:
             helper.apply(plan_path)
             launch.assert_called_once_with([str(target / "Haven.exe")], cwd=target)
         self.assertEqual((target / "version.txt").read_text(), "0.2.0")
         self.assertEqual((target / "haven-settings.json").read_text(), "my photo folders")
-        self.assertEqual((self.root / "backup" / "Haven.exe").read_text(), "old executable")
+        self.assertEqual((work / "backup" / "Haven.exe").read_text(), "old executable")
+        self.assertTrue((work / "completed").exists())
+        updater.cleanup_completed_updates(target)
+        self.assertFalse(work.exists())
+        self.assertEqual((target / "Haven.exe").read_text(), "new executable")
+
+    def test_update_cleanup_preserves_failed_and_active_backups(self):
+        target = self.root / "target"
+        target.mkdir()
+        (target / "version.txt").write_text("0.3.0")
+        staging = target / ".updates"
+        for name, version, failed in (("haven-old", "0.2.0", False), ("haven-current", "0.3.0", False), ("haven-failed", "0.2.0", True), ("haven-active", "0.4.0", False)):
+            work = staging / name
+            (work / "backup").mkdir(parents=True)
+            (work / "backup" / "Haven.exe").write_text("old executable")
+            (work / "plan.json").write_text(json.dumps({"target": str(target), "manifest": {"version": version}}))
+            if failed:
+                (work / "update-error.txt").write_text("failed")
+        updater.cleanup_completed_updates(target)
+        self.assertFalse((staging / "haven-old").exists())
+        self.assertFalse((staging / "haven-current").exists())
+        self.assertTrue((staging / "haven-failed" / "backup" / "Haven.exe").exists())
+        self.assertTrue((staging / "haven-active" / "backup" / "Haven.exe").exists())
 
     def test_download_checksum_failure_and_offline_check(self):
         data = b"invalid update payload"

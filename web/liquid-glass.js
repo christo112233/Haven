@@ -204,6 +204,20 @@
     cursorElement.classList.toggle('is-modal', Boolean(dialog));
   }
 
+  function visibleWithinScrollers(node, bounds) {
+    for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      const clips = /(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`);
+      if (!clips) continue;
+      const clip = parent.getBoundingClientRect();
+      // A partially visible row can still paint its full rounded surface into
+      // the WebGL canvas. Skip it until the scroll position places it fully
+      // inside the clipping container.
+      if (bounds.left < clip.left || bounds.right > clip.right || bounds.top < clip.top || bounds.bottom > clip.bottom) return false;
+    }
+    return true;
+  }
+
   function rectangles(root, dt) {
     const rects=[];
     let mergedCursor=false;
@@ -216,7 +230,9 @@
         // Keep its pointer cursor in the DOM so it cannot be painted underneath the panel.
         if(node.closest('#metadata-filter'))continue;
         if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
-        const distance=distanceToBounds(node.getBoundingClientRect());
+        const bounds=node.getBoundingClientRect();
+        if(!visibleWithinScrollers(node,bounds))continue;
+        const distance=distanceToBounds(bounds);
         if(distance<mergeDistance){mergeTarget=node;mergeDistance=distance;}
       }
       if(!root){
@@ -235,6 +251,7 @@
       if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
       const bounds=node.getBoundingClientRect();
       if(bounds.width<2||bounds.height<2||bounds.bottom<0||bounds.top>innerHeight)continue;
+      if(!visibleWithinScrollers(node,bounds))continue;
       const style=getComputedStyle(node);
       const radius=Math.min(parseFloat(style.borderTopLeftRadius)||8,bounds.width/2,bounds.height/2);
       const value=spring(node,{x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2,w:bounds.width,h:bounds.height},dt);
@@ -276,7 +293,10 @@
         rects.push({...value,radius:12,activity:isPressed?1:.25,tinted:true,trail});
       }
     }
-    if(!root)cursorElement?.classList.toggle('is-gpu-free',cursorVisible&&!activeDialog&&!mergedCursor);
+    if(!root){
+      const domLayer=hover?.closest?.('#metadata-filter');
+      cursorElement?.classList.toggle('is-gpu-free',cursorVisible&&!activeDialog&&(!mergedCursor||domLayer));
+    }
     const drawCursor = cursorVisible && root && activeDialog===root && !mergedCursor;
     if (drawCursor) {
       rects.push({x:cursorTarget.x,y:cursorTarget.y,w:24,h:24,radius:12,cursor:true,tinted:true,modalSurface:!!root,activity:pressed ? .7 : .2,blur:0});

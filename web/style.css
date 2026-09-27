@@ -110,9 +110,9 @@ button.liquid-surface.is-pressed { filter: brightness(1.16) drop-shadow(0 0 22px
 .sidebar-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 13px; font-size: 12px; color: var(--muted); }
 .sidebar-heading button { width: 34px; height: 34px; }
 #tree { flex: 1; overflow: auto; padding-bottom: 20px; scrollbar-width: thin; scrollbar-color: #e4f7ff35 transparent; }
-.smart-albums { flex: 0 0 auto; max-height: 190px; overflow: auto; border-top: 1px solid var(--border); padding-top: 12px; }
+.smart-albums { flex: 0 0 auto; border-top: 1px solid var(--border); padding-top: 12px; background:transparent; }
 .smart-albums .sidebar-heading { padding-bottom: 7px; }
-#smart-albums-list { padding: 0 8px 8px; }
+#smart-albums-list { max-height: 128px; overflow-y: auto; padding: 0 8px 8px; }
 .smart-album-row { display:flex; align-items:center; gap:8px; min-height:32px; padding:0 9px; border-radius:12px; color:var(--muted); font-size:11px; cursor:pointer; }
 .smart-album-row:hover,.smart-album-row.active { background:var(--hover); color:var(--text); }
 .smart-album-row svg { width:14px; height:14px; }

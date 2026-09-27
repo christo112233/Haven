@@ -85,3 +85,38 @@ def install(manifest, progress):
     plan = work / "plan.json"
     cache.atomic_json(plan, {"target": str(config.APP_DIR), "package": str(package), "pid": os.getpid(), "current": config.VERSION, "manifest": manifest})
     subprocess.Popen([str(copied_helper), "--plan", str(plan)], cwd=work, creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def cleanup_completed_updates(target):
+    target = Path(target).resolve()
+    staging = target / ".updates"
+    installed = target / "version.txt"
+    if not staging.is_dir() or staging.is_symlink() or not installed.is_file():
+        return
+    try:
+        current = Version(installed.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return
+    for work in staging.glob("haven-*"):
+        if not work.is_dir() or work.is_symlink() or (work / "update-error.txt").exists():
+            continue
+        try:
+            plan = json.loads((work / "plan.json").read_text(encoding="utf-8"))
+            if Path(plan["target"]).resolve() != target:
+                continue
+            version = Version(plan["manifest"]["version"])
+            # Earlier updater releases left no marker. Their backup and the
+            # installed version identify a completed update without an error.
+            if current < version or (not (work / "completed").is_file() and not (work / "backup").is_dir()):
+                continue
+            for name in ("backup", "stage"):
+                path = work / name
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+            (work / "package.zip").unlink(missing_ok=True)
+            (work / "updater.exe").unlink(missing_ok=True)
+            shutil.rmtree(work)
+        except (OSError, ValueError, KeyError, TypeError):
+            # Windows may still have the copied updater open. The next attempt
+            # or next launch can finish deleting the directory.
+            continue

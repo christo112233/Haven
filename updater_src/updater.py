@@ -97,6 +97,10 @@ def apply(plan_path):
         raise ValueError("当前安装已是相同或更高版本")
     replace(target, stage, work / "backup")
     subprocess.Popen([str(target / "Haven.exe")], cwd=target)
+    try:
+        (work / "completed").touch()
+    except OSError:
+        pass
 
 
 def main():

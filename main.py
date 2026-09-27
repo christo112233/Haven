@@ -8,6 +8,7 @@ import time
 from api import Api
 from config import APP_DIR, RESOURCE_DIR
 from server import start, METHODS
+from updater import cleanup_completed_updates
 
 
 def main():
@@ -24,6 +25,11 @@ def main():
     if args.folder:
         api.add_folder(args.folder)
     server = start(api, args.port)
+    def cleanup_updates():
+        for _ in range(10):
+            time.sleep(1)
+            cleanup_completed_updates(APP_DIR)
+    threading.Thread(target=cleanup_updates, daemon=True).start()
     if args.browser:
         print(api.base_url, flush=True)
         try:
