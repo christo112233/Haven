@@ -19,9 +19,12 @@
   <aside id="sidebar">
     <div class="brand pywebview-drag-region"><i data-lucide="aperture"></i><span>Haven<span class="brand-dot">.</span></span></div>
     <div class="sidebar-heading"><span>文件夹</span><button id="add-folder" class="icon-button glass" title="添加文件夹" aria-label="添加文件夹"><i data-lucide="folder-plus"></i></button></div>
+    <div class="folder-search"><i data-lucide="search"></i><input id="folder-search" type="search" placeholder="搜索文件夹" aria-label="搜索文件夹" autocomplete="off"></div>
     <nav id="tree" aria-label="照片目录"></nav>
+    <nav id="folder-search-results" class="folder-search-results" aria-label="文件夹搜索结果" hidden></nav>
     <section class="smart-albums" aria-label="智能相册"><div class="sidebar-heading"><span>智能相册</span><button id="add-smart-album" class="icon-button" title="新建智能相册" aria-label="新建智能相册"><i data-lucide="plus"></i></button></div><nav id="smart-albums-list"></nav></section>
     <div class="sidebar-bottom"><span class="local-indicator"></span><span>本地图库</span><button id="settings-button" class="icon-button" title="设置" aria-label="设置"><i data-lucide="settings-2"></i></button></div>
+    <div id="sidebar-resize" class="sidebar-resize" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整侧边栏宽度" title="拖动调整侧边栏宽度，双击恢复默认"></div>
   </aside>
   <main>
     <header class="toolbar glass pywebview-drag-region">

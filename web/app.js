@@ -8,10 +8,52 @@ const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
 const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' : value >= 1024**2 ? (value / 1024**2).toFixed(1) + ' MB' : Math.max(1, Math.round(value / 1024)) + ' KB';
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
-let toastTimer, searchTimer, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false, renderForcePending = false, detailsCloseTimer;
-let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true, subfolderRequest = 0, subfolderNavigation = 0;
+let toastTimer, searchTimer, folderSearchTimer, folderSearchRequest = 0, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false, renderForcePending = false, detailsCloseTimer;
+let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true, subfolderRequest = 0, subfolderNavigation = 0, subfolderAnimation = null;
 let moveQueue = Promise.resolve();
 const DRAG_PATH = 'application/x-haven-path', DRAG_PATHS = 'application/x-haven-paths';
+function initSidebarResize() {
+  const root=document.documentElement,handle=$('sidebar-resize'),storageKey='haven.sidebar-width';
+  let preferred=Number(localStorage.getItem(storageKey))||null,drag=null;
+  const defaultWidth=()=>innerWidth<=500?104:innerWidth<=700?145:innerWidth<=1100?200:232;
+  const bounds=()=>{
+    const compact=innerWidth<=500,narrow=innerWidth<=700;
+    const padding=compact?8:narrow?10:innerWidth<=1100?14:18;
+    const gap=compact?8:narrow?10:innerWidth<=1100?15:20;
+    const mainWidth=compact?260:narrow?320:420;
+    const minimum=defaultWidth();
+    return {minimum,maximum:Math.max(minimum,Math.min(480,innerWidth-padding*2-gap-mainWidth))};
+  };
+  const apply=()=>{
+    const {minimum,maximum}=bounds();
+    const width=Math.max(minimum,Math.min(maximum,preferred||minimum));
+    root.style.setProperty('--sidebar',`${width}px`);
+    root.classList.toggle('sidebar-wide',width>=200);
+    handle.setAttribute('aria-valuemin',String(minimum));
+    handle.setAttribute('aria-valuemax',String(maximum));
+    handle.setAttribute('aria-valuenow',String(width));
+  };
+  const setWidth=width=>{const {minimum,maximum}=bounds();preferred=Math.max(minimum,Math.min(maximum,Math.round(width)));apply();};
+  const save=()=>{if(preferred)localStorage.setItem(storageKey,String(preferred));else localStorage.removeItem(storageKey);};
+  handle.onpointerdown=event=>{
+    if(event.button!==0)return;
+    drag={id:event.pointerId,x:event.clientX,width:Number(handle.getAttribute('aria-valuenow'))};
+    handle.setPointerCapture(event.pointerId);handle.classList.add('is-resizing');event.preventDefault();event.stopPropagation();
+  };
+  handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+event.clientX-drag.x);};
+  const endDrag=event=>{if(drag?.id!==event.pointerId)return;drag=null;handle.classList.remove('is-resizing');save();};
+  handle.onpointerup=handle.onpointercancel=endDrag;
+  handle.ondblclick=()=>{preferred=null;apply();save();};
+  handle.onkeydown=event=>{
+    if(event.key==='Home'){preferred=null;apply();save();}
+    else if(event.key==='ArrowLeft'||event.key==='ArrowRight'){
+      setWidth(Number(handle.getAttribute('aria-valuenow'))+(event.key==='ArrowRight'?1:-1)*(event.shiftKey?32:16));save();
+    }else return;
+    event.preventDefault();
+  };
+  window.addEventListener('resize',apply);
+  apply();
+}
 async function api(method, ...args) {
   if (window.pywebview?.api) return window.pywebview.api[method](...args);
   const response = await fetch('/api/' + method, {method:'POST', headers:{'Content-Type':'application/json','X-Haven-Token':window.HAVEN_TOKEN}, body:JSON.stringify(args)});
@@ -42,11 +84,21 @@ function glassSelect(id) {
     sync() {
       const option = select.options[select.selectedIndex] || select.options[0];
       button.querySelector('.select-value').textContent = option ? option.textContent : '';
+      if (select.hasAttribute('data-color-value')) button.dataset.color = select.value;
       for (const item of menu.children) item.setAttribute('aria-selected', String(item.dataset.value === select.value));
     },
-    close() { menu.hidden = true; button.setAttribute('aria-expanded', 'false'); shell.classList.remove('select-open'); },
+    close() { menu.hidden = true; button.setAttribute('aria-expanded', 'false'); shell.classList.remove('select-open'); if (menu.parentNode === document.body) { shell.append(menu); menu.classList.remove('metadata-select-menu'); menu.removeAttribute('style'); } },
     open() {
       closeSelects(); menu.hidden = false; button.setAttribute('aria-expanded', 'true'); shell.classList.add('select-open');
+      if (shell.closest('.metadata-popover.is-constrained')) {
+        document.body.append(menu);
+        menu.classList.add('metadata-select-menu');
+        const bounds = button.getBoundingClientRect();
+        menu.style.width = `${Math.max(bounds.width, 154)}px`;
+        const height = menu.offsetHeight;
+        menu.style.left = `${Math.max(12, Math.min(bounds.left, innerWidth - menu.offsetWidth - 12))}px`;
+        menu.style.top = `${bounds.bottom + 8 + height <= innerHeight - 12 ? bounds.bottom + 8 : Math.max(12, bounds.top - height - 8)}px`;
+      }
       if (shell.closest('.smart-condition')) {
         const dialog = shell.closest('dialog');
         if (dialog && !menu.dataset.dialogMenu) {
@@ -57,6 +109,7 @@ function glassSelect(id) {
         const bounds = button.getBoundingClientRect();
         const container = dialog?.getBoundingClientRect();
         const menuHeight = menu.getBoundingClientRect().height;
+        if (select.hasAttribute('data-color-value')) menu.style.width = `${bounds.width}px`;
         const below = bounds.bottom + 8 + menuHeight <= innerHeight - 12;
         const top = below ? bounds.bottom + 8 : Math.max(12, bounds.top - menuHeight - 8);
         menu.style.left = `${Math.max(12, bounds.left - (container?.left || 0))}px`;
@@ -151,7 +204,7 @@ async function addFolder(path) {
   // The backend folds folders that already live inside an added folder into that tree.
   if (result.expanded) state.expanded = new Set(result.expanded); else state.expanded.add(result.path);
   await api('settings', {expanded:[...state.expanded]});
-  await renderTree(); await openFolder(result.path);
+  await renderTree(); refreshFolderSearch(); await openFolder(result.path);
 }
 async function renderTree() {
   const treeEpoch = (state.treeEpoch || 0) + 1; state.treeEpoch = treeEpoch;
@@ -214,6 +267,40 @@ async function renderTree() {
   }
   icons(tree);
 }
+function renderFolderSearchResults(result){
+  const host=$('folder-search-results'),items=result.items;
+  host.replaceChildren();
+  const status=document.createElement('div');status.className='folder-search-status';status.setAttribute('role','status');
+  status.textContent=result.truncated?`显示前 ${number.format(items.length)} 个结果`:items.length?`${number.format(items.length)} 个文件夹`:'未找到文件夹';
+  host.append(status);
+  for(const item of items){
+    const button=document.createElement('button');button.type='button';button.className='folder-search-result';button.title=item.path;
+    const icon=document.createElement('i');icon.dataset.lucide='folder';
+    const labels=document.createElement('span'),name=document.createElement('strong'),parent=document.createElement('small');
+    name.textContent=item.name;parent.textContent=item.parent.split(/[\\/]/).filter(Boolean).slice(-2).join(' / ');parent.title=item.parent;labels.append(name,parent);button.append(icon,labels);
+    button.onclick=()=>{$('folder-search').value='';updateFolderSearch();safely(()=>openSubfolder(item.path,true));};
+    host.append(button);
+  }
+  icons(host);
+}
+function updateFolderSearch(){
+  clearTimeout(folderSearchTimer);
+  const query=$('folder-search').value.trim(),host=$('folder-search-results');
+  const request=++folderSearchRequest;
+  $('tree').hidden=Boolean(query);host.hidden=!query;
+  if(!query){host.replaceChildren();return;}
+  host.replaceChildren();
+  const status=document.createElement('div');status.className='folder-search-status';status.setAttribute('role','status');status.textContent='正在搜索…';host.append(status);
+  folderSearchTimer=setTimeout(async()=>{
+    try{
+      const result=await api('search_folders',query);
+      if(request===folderSearchRequest)renderFolderSearchResults(result);
+    }catch(error){
+      if(request===folderSearchRequest)status.textContent=error.message||String(error);
+    }
+  },300);
+}
+function refreshFolderSearch(){if($('folder-search')?.value.trim())updateFolderSearch();}
 async function restoreAfterSmartAlbumDelete() { state.smartAlbum = null; const folder = state.lastFolder || state.roots[0]; if (folder) await openFolder(folder); else resetEmpty(); }
 function renderSubfolders() {
   const host=$('subfolders'),list=$('subfolders-list'),toggle=$('subfolders-toggle');
@@ -222,22 +309,43 @@ function renderSubfolders() {
   if(host.hidden){list.replaceChildren();return;}
   $('subfolders-heading').textContent=`子文件夹 · ${number.format(children.length)}`;
   host.classList.toggle('is-expanded',state.subfoldersExpanded);
-  list.replaceChildren(...(state.subfoldersExpanded?children:children.slice(0,3)).map(child=>{
-    const button=document.createElement('button');
-    button.type='button';button.className='subfolder-link glass';button.title=child.name;
-    button.setAttribute('aria-label',`打开子文件夹 ${child.name}`);
-    const icon=document.createElement('i');icon.dataset.lucide='folder';
-    const label=document.createElement('span');label.textContent=child.name;
-    button.append(icon,label);
+  const visible=state.subfoldersExpanded?children:children.slice(0,3);
+  const existing=new Map([...list.children].map(button=>[button.dataset.path,button]));
+  visible.forEach((child,index)=>{
+    let button=existing.get(child.path);
+    if(!button){
+      button=document.createElement('button');button.type='button';button.className='subfolder-link glass';
+      const icon=document.createElement('i');icon.dataset.lucide='folder';
+      const label=document.createElement('span');button.append(icon,label);
+    }
+    button.dataset.path=child.path;button.title=child.name;button.setAttribute('aria-label',`打开子文件夹 ${child.name}`);
+    button.querySelector('span').textContent=child.name;
     button.onclick=()=>safely(()=>openSubfolder(child.path));
-    return button;
-  }));
+    if(list.children[index]!==button)list.insertBefore(button,list.children[index]||null);
+  });
+  while(list.children.length>visible.length)list.lastElementChild.remove();
   toggle.hidden=children.length<=3;
   toggle.setAttribute('aria-expanded',String(state.subfoldersExpanded));
   toggle.querySelector('span').textContent=state.subfoldersExpanded?'收起':`还有 ${number.format(children.length-3)} 个`;
   icons(list);
 }
-function clearSubfolders(){subfolderRequest++;state.subfolders=[];state.subfoldersExpanded=false;renderSubfolders();}
+function toggleSubfolders(){
+  const list=$('subfolders-list');
+  const start=list.getBoundingClientRect().height;
+  subfolderAnimation?.cancel();subfolderAnimation=null;
+  list.style.overflow='';
+  state.subfoldersExpanded=!state.subfoldersExpanded;
+  renderSubfolders();
+  list.scrollTop=0;
+  const end=list.getBoundingClientRect().height;
+  if(start===end||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  list.style.overflow='hidden';
+  const animation=list.animate([{height:`${start}px`,opacity:.7},{height:`${end}px`,opacity:1}],{duration:300,easing:'cubic-bezier(.18,.85,.25,1)'});
+  subfolderAnimation=animation;
+  const finish=()=>{if(subfolderAnimation===animation){list.style.overflow='';subfolderAnimation=null;}};
+  animation.onfinish=finish;animation.oncancel=finish;
+}
+function clearSubfolders(){subfolderAnimation?.cancel();subfolderAnimation=null;$('subfolders-list').style.overflow='';subfolderRequest++;state.subfolders=[];state.subfoldersExpanded=false;renderSubfolders();}
 async function loadSubfolders(path,epoch=state.epoch){
   const request=++subfolderRequest;
   try{
@@ -289,11 +397,11 @@ function treeRow(path) {
   };
   row.oncontextmenu = event => {
     event.preventDefault();
-    const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
+    const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();refreshFolderSearch();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
     actions.unshift(['pencil','重命名',() => renamePath(path,basename(path),true)]);
     actions.push(['folder-plus','新建子文件夹',() => createChildFolder(path)]);
     if (state.roots.includes(path)) {
-      actions.push(['folder-minus','移除根目录', async () => {const saved = await api('remove_folder',path);state.roots = saved.roots;forgetTree(path);await renderTree();if(saved.current) await openFolder(saved.current);else resetEmpty();}]);
+      actions.push(['folder-minus','移除根目录', async () => {const saved = await api('remove_folder',path);state.roots = saved.roots;forgetTree(path);await renderTree();if(saved.current) await openFolder(saved.current);else resetEmpty();refreshFolderSearch();}]);
     }
     contextMenu(event, actions);
   };
@@ -351,7 +459,7 @@ async function createChildFolder(parent){
   if(name===null)return;
   await api('create_folder',parent,name);
   state.expanded.add(parent);await api('settings',{expanded:[...state.expanded]});
-  state.children.clear();state.counts.clear();await renderTree();if(samePath(parent,state.folder))await loadSubfolders(parent);toast('子文件夹已创建');
+  state.children.clear();state.counts.clear();await renderTree();refreshFolderSearch();if(samePath(parent,state.folder))await loadSubfolders(parent);toast('子文件夹已创建');
 }
 function forgetTree(path) {
   for (const key of [...state.children.keys()]) if (key === path || key.startsWith(path + '\\') || key.startsWith(path + '/')) state.children.delete(key);
@@ -367,11 +475,12 @@ function resetEmpty() {
   $('grid').replaceChildren();$('grid').removeAttribute('style');$('empty').hidden=false;$('empty').querySelector('h2').textContent='打开你的照片文件夹';$('empty-add').hidden=false;
   $('folder-title').textContent='Haven';$('folder-summary').textContent='尚未添加文件夹';$('breadcrumbs').textContent='图库';$('status').textContent='0 个项目';$('scan-progress').hidden=true;
 }
-async function openSubfolder(path){
+async function openSubfolder(path,refreshTree=false){
   const navigation=++subfolderNavigation;
   const root=state.roots.find(candidate=>normalizeClientPath(path).startsWith(normalizeClientPath(candidate).replace(/\/+$/,'')+'/'));
   if(root){
     for(let folder=parentPath(path);;folder=parentPath(folder)){
+      if(refreshTree)state.children.delete(folder);
       state.expanded.add(folder);
       if(samePath(folder,root))break;
     }
@@ -501,6 +610,20 @@ function promptTags(paths,remove=false){
 async function promptRating(paths){const dialog=$('rating-dialog');dialog.showModal();const choices=[...document.querySelectorAll('#rating-choices button')];choices.forEach(button=>button.classList.remove('is-active'));const current=itemsForPaths(paths);const shared=current.length&&current.every(item=>item.rating===current[0].rating)?current[0].rating:null;choices.forEach(button=>button.classList.toggle('is-active',Number(button.dataset.rating)<=Number(shared||0)));return new Promise(resolve=>{let done=false;const finish=async value=>{if(done)return;done=true;dialog.close();await applyMetadata(paths,{rating:value});resolve();};choices.forEach(button=>button.onclick=()=>finish(Number(button.dataset.rating)));$('rating-clear').onclick=()=>finish(null);$('rating-cancel').onclick=()=>{done=true;dialog.close();resolve();};$('rating-dialog-close').onclick=()=>{done=true;dialog.close();resolve();};dialog.oncancel=event=>{event.preventDefault();done=true;dialog.close();resolve();};});}
 function readMetadataFilters(){const filters={};const tags=$('filter-tags').value.split(',').map(value=>value.trim()).filter(Boolean);if(tags.length)filters.tags=tags;const rating=$('filter-rating').value;if(rating)filters.rating=rating==='unrated'?'unrated':Number(rating);if(rating&&rating!=='unrated')filters.rating_op=$('filter-rating-op').value;const color=$('filter-color').value;if(color)filters.color_label=color;for(const key of ['favorite','flagged','rejected'])if($('filter-'+key).checked)filters[key]=true;return filters;}
 function clearMetadataFilters(){state.metadataFilters={};$('filter-tags').value='';$('filter-rating').value='';$('filter-color').value='';for(const key of ['favorite','flagged','rejected'])$('filter-'+key).checked=false;}
+function positionMetadataFilter(){
+  const panel=$('metadata-filter');
+  if(panel.hidden)return;
+  closeSelects();
+  const button=$('metadata-filter-button').getBoundingClientRect();
+  const width=panel.offsetWidth;
+  const left=Math.max(12,Math.min(innerWidth-width-12,button.left+button.width/2-width/2));
+  const top=button.bottom+8;
+  panel.style.setProperty('--filter-left',`${left}px`);
+  panel.style.setProperty('--filter-top',`${top}px`);
+  panel.style.setProperty('--filter-origin-x',`${button.left+button.width/2-left}px`);
+  panel.classList.remove('is-constrained');
+  panel.classList.toggle('is-constrained',panel.offsetHeight>innerHeight-top-12);
+}
 function visibleGrid() {
   const viewport=$('viewport'),grid=$('grid');const width=grid.clientWidth;
   const columns=Math.max(1,Math.floor((width+18)/(state.size+18))),tile=(width-(columns-1)*18)/columns,rowHeight=tile+85;
@@ -562,7 +685,7 @@ async function renamePath(path,currentName,directory=false){
   if(next===null||next===currentName)return;
   const result=await api('rename',path,next);
   if(directory){
-    state.roots=result.roots||state.roots;state.expanded=new Set(result.expanded||[]);forgetTree(path);await renderTree();
+    state.roots=result.roots||state.roots;state.expanded=new Set(result.expanded||[]);forgetTree(path);await renderTree();refreshFolderSearch();
     if(result.current){state.folder=result.current;await openFolder(result.current);}else resetEmpty();
   }else if(state.folder)await openFolder(state.folder);
   toast(`${directory?'文件夹':'文件'}已重命名`);
@@ -611,17 +734,51 @@ async function showViewer(index){
 function closeViewer(){setDetailsOpen(false);$('viewer-video').pause();$('viewer').close();scheduleRender();}
 function showUpdate(result){if(!result.available)return;state.update=result.manifest;const data=state.update;$('update-version').textContent=`新版本 ${data.version}`;$('update-notes').textContent=data.notes||'新版本已发布';$('update-size').textContent=bytes(data.size);$('skip-update').hidden=!!data.mandatory;$('later-update').hidden=!!data.mandatory;$('download-progress').hidden=true;$('download-status').textContent='';$('install-update').disabled=false;if(!$('update-dialog').open)$('update-dialog').showModal();}
 async function installUpdate(){await api('install_update',true);$('install-update').disabled=true;$('skip-update').disabled=true;$('later-update').disabled=true;$('download-progress').hidden=false;const poll=async()=>{const progress=await api('update_progress');$('download-progress').value=progress.progress||0;$('download-status').textContent=progress.state==='error'?progress.error:progress.state==='restarting'?'正在重启…':`正在下载 ${progress.progress||0}%`;if(progress.state==='downloading')setTimeout(()=>safely(poll),500);else if(progress.state==='error'){$('install-update').disabled=false;$('skip-update').disabled=false;$('later-update').disabled=false;}};await poll();}
- function conditionRows(){return [...document.querySelectorAll('#smart-album-conditions .smart-condition')].map(row=>{const input=row.querySelector('input[data-value]'),color=row.querySelector('select[data-color-value]');return {field:row.querySelector('select[data-field]').value,operator:row.querySelector('select[data-operator]').value,value:color&&!color.hidden?color.value:input?.value.trim()||''};}).filter(row=>row.value!==''||row.operator==='is_empty');}
-function configureConditionRow(row){const field=row.querySelector('[data-field]'),operator=row.querySelector('[data-operator]'),value=row.querySelector('input[data-value]');let color=row.querySelector('select[data-color-value]');if(!color){color=document.createElement('select');color.dataset.colorValue='true';color.className='condition-color-value';color.innerHTML='<option value="">选择颜色</option><option value="red">红色</option><option value="yellow">黄色</option><option value="green">绿色</option><option value="blue">蓝色</option><option value="purple">紫色</option>';row.append(color);}const sync=()=>{const isBool=['favorite','flagged','rejected'].includes(field.value),isColor=field.value==='color_label';operator.innerHTML=isBool?'<option value="=">等于</option>':field.value==='tags'?'<option value="contains">包含</option><option value="not_contains">不包含</option>':field.value==='rating'?'<option value=">=">至少</option><option value="=">等于</option><option value="<=">至多</option><option value="is_empty">未评分</option>':'<option value="=">等于</option>';value.hidden=isColor;color.hidden=!isColor;value.type='text';value.placeholder=isBool?'true / false':field.value==='rating'?'1-5 或留空':'值';value.disabled=field.value==='rating'&&operator.value==='is_empty';if(isColor&&value.value)color.value=value.value;};field.onchange=sync;operator.onchange=sync;color.onchange=()=>{value.value=color.value;};sync();}
+function conditionRows(){return [...document.querySelectorAll('#smart-album-conditions .smart-condition')].map(row=>{const input=row.querySelector('input[data-value]'),color=row.querySelector('select[data-color-value]'),boolean=row.querySelector('input[data-boolean-value]');return {field:row.querySelector('select[data-field]').value,operator:row.querySelector('select[data-operator]').value,value:!boolean.parentElement.hidden?boolean.checked? 'true':'false':color&&!color.hidden?color.value:input?.value.trim()||''};}).filter(row=>row.value!==''||row.operator==='is_empty');}
+function configureConditionRow(row){
+  const field=row.querySelector('[data-field]'),operator=row.querySelector('[data-operator]'),value=row.querySelector('input[data-value]');
+  let color=row.querySelector('select[data-color-value]');
+  if(!color){
+    color=document.createElement('select');color.dataset.colorValue='true';color.className='condition-color-value';color.setAttribute('aria-label','颜色标签');
+    color.innerHTML='<option value="">选择颜色</option><option value="red">红色</option><option value="yellow">黄色</option><option value="green">绿色</option><option value="blue">蓝色</option><option value="purple">紫色</option>';
+    const shell=document.createElement('div');shell.className='select-shell condition-select condition-color-select';shell.append(color);row.append(shell);
+  }
+  let boolean=row.querySelector('input[data-boolean-value]');
+  if(!boolean){const label=document.createElement('label');label.className='condition-boolean-value';label.innerHTML='<input type="checkbox" data-boolean-value checked><span></span>';row.append(label);boolean=label.querySelector('input');}
+  const syncBoolean=()=>{const labels={favorite:['已收藏','未收藏'],flagged:['有旗帜','无旗帜'],rejected:['已标记 Rejected','未标记 Rejected']};boolean.nextElementSibling.textContent=labels[field.value]?.[boolean.checked?0:1]||'';};
+  const sync=()=>{
+    const isBool=['favorite','flagged','rejected'].includes(field.value),isColor=field.value==='color_label';
+    operator.innerHTML=isBool?'<option value="=">等于</option>':field.value==='tags'?'<option value="contains">包含</option><option value="not_contains">不包含</option>':field.value==='rating'?'<option value=">=">至少</option><option value="=">等于</option><option value="<=">至多</option><option value="is_empty">未评分</option>':'<option value="=">等于</option>';
+    value.hidden=isColor||isBool;color.hidden=!isColor;color.parentElement.hidden=!isColor;boolean.parentElement.hidden=!isBool;
+    value.type='text';value.placeholder=field.value==='rating'?'1-5 或留空':'值';value.disabled=field.value==='rating'&&operator.value==='is_empty';
+    if(isColor&&value.value){color.value=value.value;syncSelect(color.id);}
+    syncBoolean();
+  };
+  field.onchange=sync;operator.onchange=sync;color.onchange=()=>{value.value=color.value;};boolean.onchange=syncBoolean;sync();
+}
 function addConditionRow(){const host=$('smart-album-conditions'),row=host.firstElementChild.cloneNode(true);row.querySelector('[data-value]').value='';host.append(row);configureConditionRow(row);}
 let editingSmartAlbumId=null, conditionSequence=0;
-function buildConditionRow(condition={}){const row=document.createElement('div');row.className='smart-condition';row.innerHTML='<select data-field><option value="rating">评分</option><option value="tags">标签</option><option value="color_label">颜色标签</option><option value="favorite">收藏</option><option value="flagged">旗帜</option><option value="rejected">Rejected</option></select><select data-operator></select><input data-value placeholder="值"><button type="button" class="icon-button condition-remove" title="移除条件" aria-label="移除条件"><i data-lucide="x"></i></button>';row.querySelector('[data-field]').value=condition.field||'rating';configureConditionRow(row);const operator=row.querySelector('[data-operator]');if(condition.operator)operator.value=condition.operator;const input=row.querySelector('input[data-value]'),color=row.querySelector('select[data-color-value]');if(condition.value!==undefined&&condition.value!=='unrated'){input.value=String(condition.value);color.value=String(condition.value);}input.disabled=operator.value==='is_empty';row.querySelector('.condition-remove').onclick=()=>{if(document.querySelectorAll('#smart-album-conditions .smart-condition').length>1)row.remove();};const field=row.querySelector('[data-field]');field.id=`condition-field-${++conditionSequence}`;operator.id=`condition-operator-${conditionSequence}`;const fieldShell=document.createElement('div'),operatorShell=document.createElement('div');fieldShell.className='select-shell condition-select';operatorShell.className='select-shell condition-select';field.replaceWith(fieldShell);operator.replaceWith(operatorShell);fieldShell.append(field);operatorShell.append(operator);glassSelectNode(field,field.id);glassSelectNode(operator,operator.id);field.addEventListener('change',()=>refreshSelectOptions(operator.id));configureConditionRow(row);icons(row);return row;}
+function buildConditionRow(condition={}){
+  const row=document.createElement('div');row.className='smart-condition';
+  row.innerHTML='<select data-field><option value="rating">评分</option><option value="tags">标签</option><option value="color_label">颜色标签</option><option value="favorite">收藏</option><option value="flagged">旗帜</option><option value="rejected">Rejected</option></select><select data-operator></select><input data-value placeholder="值"><button type="button" class="icon-button condition-remove" title="移除条件" aria-label="移除条件"><i data-lucide="x"></i></button>';
+  row.querySelector('[data-field]').value=condition.field||'rating';configureConditionRow(row);
+  const field=row.querySelector('[data-field]'),operator=row.querySelector('[data-operator]'),input=row.querySelector('input[data-value]'),color=row.querySelector('select[data-color-value]'),boolean=row.querySelector('input[data-boolean-value]');
+  if(condition.operator)operator.value=condition.operator;
+  if(condition.value!==undefined&&condition.value!=='unrated'){input.value=String(condition.value);color.value=String(condition.value);boolean.checked=condition.value!==false&&condition.value!=='false';}
+  input.disabled=operator.value==='is_empty';
+  row.querySelector('.condition-remove').onclick=()=>{if(document.querySelectorAll('#smart-album-conditions .smart-condition').length>1)row.remove();};
+  field.id=`condition-field-${++conditionSequence}`;operator.id=`condition-operator-${conditionSequence}`;color.id=`condition-color-${conditionSequence}`;
+  for(const select of [field,operator]){const shell=document.createElement('div');shell.className='select-shell condition-select';select.replaceWith(shell);shell.append(select);glassSelectNode(select,select.id);}
+  const colorControl=glassSelectNode(color,color.id);colorControl.button.classList.add('color-select-button');colorControl.menu.classList.add('color-select-menu');
+  field.addEventListener('change',()=>refreshSelectOptions(operator.id));configureConditionRow(row);icons(row);return row;
+}
  function openSmartAlbumEditor(album=null){editingSmartAlbumId=album?.id||null;const dialog=$('smart-album-dialog');dialog.querySelector('h2').textContent=album?'编辑智能相册':'新建智能相册';$('smart-album-name').value=album?.name||'';$('smart-album-logic').value=album?.definition?.logic||'and';syncSelect('smart-album-logic');const host=$('smart-album-conditions');host.replaceChildren(...((album?.definition?.conditions||[{}]).map(buildConditionRow)));dialog.showModal();}
 function createSmartAlbum(){openSmartAlbumEditor();}
 function editSmartAlbum(album){openSmartAlbumEditor(album);}
 function bindSmartAlbumForm(){const form=$('smart-album-form');form.onsubmit=event=>safely(async()=>{event.preventDefault();const name=$('smart-album-name').value.trim();const conditions=conditionRows().map(row=>({field:row.field,operator:row.operator,value:row.operator==='is_empty'?'unrated':['favorite','flagged','rejected'].includes(row.field)?row.value.toLowerCase()==='true':row.field==='rating'?Number(row.value):row.value}));if(!name||!conditions.length)throw new Error('请填写相册名称并至少添加一个条件');const definition={logic:$('smart-album-logic').value,conditions};if(editingSmartAlbumId)await api('update_smart_album',editingSmartAlbumId,name,definition);else await api('create_smart_album',name,definition);dialogClose('smart-album-dialog');await renderSmartAlbums();});$('add-smart-condition').onclick=()=>{$('smart-album-conditions').append(buildConditionRow());};}
 function dialogClose(id){const dialog=$(id);if(dialog?.open)dialog.close();}
 async function init(){
+  initSidebarResize();
   glassSelect('filter-rating-op');glassSelect('filter-rating');glassSelect('filter-color');glassSelect('smart-album-logic');
   icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;syncSelect('theme-select');$('thumb-size').value=state.size;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;ensureTransparencyControl(Number.isFinite(Number(boot.state.glass_transparency))?Number(boot.state.glass_transparency):.24);
   const knownTags=await api('list_tags');$('tag-suggestions').replaceChildren(...knownTags.map(tag=>{const option=document.createElement('option');option.value=tag.name;return option;}));
@@ -643,21 +800,22 @@ async function init(){
   }
   $('add-folder').onclick=$('empty-add').onclick=()=>safely(()=>addFolder());
   $('path-form').onsubmit=event=>{event.preventDefault();safely(async()=>{await addFolder($('folder-path').value.trim());$('path-dialog').close();});};
-  $('refresh').onclick=()=>{state.children.clear();state.counts.clear();safely(async()=>{await renderTree();if(state.folder)await openFolder(state.folder);});};
-  $('subfolders-toggle').onclick=()=>{state.subfoldersExpanded=!state.subfoldersExpanded;renderSubfolders();};
+  $('refresh').onclick=()=>{state.children.clear();state.counts.clear();safely(async()=>{await renderTree();refreshFolderSearch();if(state.folder)await openFolder(state.folder);});};
+  $('folder-search').oninput=updateFolderSearch;
+  $('folder-search').onkeydown=event=>{if(event.key==='Escape'){$('folder-search').value='';updateFolderSearch();}else if(event.key==='Enter'){event.preventDefault();$('folder-search-results').querySelector('.folder-search-result')?.click();}};
+  $('subfolders-toggle').onclick=toggleSubfolders;
   $('up-folder').onclick=()=>safely(async()=>{if(!state.folder)return;const parent=state.folder.replace(/[\\/][^\\/]+[\\/]?$/,'');if(parent&&parent!==state.folder)await openFolder(parent);});
   $('theme-button').onclick=()=>theme((themeTarget||document.documentElement.dataset.theme)==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
   $('search').oninput=event=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=event.target.value;safely(reloadFilter);},200);};
   $('filters').onclick=event=>{const button=event.target.closest('[data-kind]');if(!button)return;state.kind=button.dataset.kind;for(const tab of $('filters').children)tab.setAttribute('aria-selected',tab===button);safely(reloadFilter);};
-  $('metadata-filter-button').onclick=event=>{event.stopPropagation();$('metadata-filter').hidden=!$('metadata-filter').hidden;};$('metadata-filter-close').onclick=()=>$('metadata-filter').hidden=true;$('filter-apply').onclick=()=>{state.metadataFilters=readMetadataFilters();$('metadata-filter').hidden=true;safely(reloadFilter);};$('filter-clear').onclick=()=>{clearMetadataFilters();$('metadata-filter').hidden=true;safely(reloadFilter);};
+  $('metadata-filter-button').onclick=event=>{event.stopPropagation();const panel=$('metadata-filter');panel.hidden=!panel.hidden;if(panel.hidden)closeSelects();else positionMetadataFilter();};$('metadata-filter-close').onclick=()=>{$('metadata-filter').hidden=true;closeSelects();};$('filter-apply').onclick=()=>{state.metadataFilters=readMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};$('filter-clear').onclick=()=>{clearMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};
+  window.addEventListener('resize',positionMetadataFilter);
   $('selection-mode').onclick=toggleSelectionMode;
   $('clear-selection').onclick=()=>{state.selection.clear();state.lastSelectedIndex=null;updateBulkToolbar();scheduleRender();};
-  const removeTagButton=document.createElement('button');removeTagButton.className='icon-button';removeTagButton.title='移除标签';removeTagButton.setAttribute('aria-label','移除标签');removeTagButton.innerHTML='<i data-lucide="tag"></i>';removeTagButton.onclick=()=>safely(()=>promptTags(selectedPaths(),true));$('bulk-toolbar').insertBefore(removeTagButton,$('clear-selection'));icons(removeTagButton);
-  document.querySelectorAll('[data-bulk="favorite"],[data-bulk="flagged"],[data-bulk="rejected"]').forEach(button=>button.onclick=()=>safely(()=>toggleMetadata(selectedPaths(),button.dataset.bulk)));
   $('add-smart-album').onclick=()=>createSmartAlbum();
   configureConditionRow($('smart-album-conditions').firstElementChild);
   bindSmartAlbumForm();
-  document.querySelectorAll('[data-bulk]').forEach(button=>button.onclick=()=>safely(async()=>{const paths=selectedPaths();if(!paths.length)return;const action=button.dataset.bulk;if(action==='tag-add')await promptTags(paths);else if(action==='rating')await promptRating(paths);else if(action==='color')await promptColor(paths);else if(action==='favorite')await applyMetadata(paths,{favorite:true});else if(action==='flagged')await applyMetadata(paths,{flagged:true});else if(action==='rejected')await applyMetadata(paths,{rejected:true});}));
+  document.querySelectorAll('[data-bulk]').forEach(button=>button.onclick=()=>safely(async()=>{const paths=selectedPaths();if(!paths.length)return;const action=button.dataset.bulk;if(action==='tag-add')await promptTags(paths);else if(action==='rating')await promptRating(paths);else if(action==='color')await promptColor(paths);else if(['favorite','flagged','rejected'].includes(action))await toggleMetadata(paths,action);}));
   $('sort').onchange=event=>{state.sort=event.target.value;safely(reloadFilter);};$('sort-direction').onclick=()=>{state.descending=!state.descending;$('sort-direction').style.transform=state.descending?'rotate(180deg)':'';safely(reloadFilter);};
   $('thumb-size').oninput=event=>{state.size=Number(event.target.value);document.documentElement.style.setProperty('--tile',state.size+'px');scheduleRender();};$('thumb-size').onchange=()=>safely(()=>api('settings',{thumb_size:state.size}));
   $('recursive').onchange=()=>{if(state.folder)safely(()=>openFolder(state.folder));};$('viewport').onscroll=()=>scheduleRender(false);new ResizeObserver(()=>scheduleRender()).observe($('viewport'));
@@ -706,7 +864,7 @@ async function init(){
   $('check-update').onclick=()=>safely(async()=>{$('check-update').disabled=true;$('update-check-status').textContent='正在检查…';try{const result=await api('check_update',true);$('update-check-status').textContent=result.error||(result.available?'发现新版本':'已是最新版本');if(result.available){$('settings-dialog').close();showUpdate(result);}}finally{$('check-update').disabled=false;}});
   $('later-update').onclick=()=>$('update-dialog').close();$('skip-update').onclick=()=>safely(async()=>{await api('settings',{skipped_version:state.update.version});$('update-dialog').close();});$('install-update').onclick=()=>safely(installUpdate);$('update-dialog').oncancel=event=>{if(state.update?.mandatory||$('install-update').disabled)event.preventDefault();};
   $('sidebar').ondragover=event=>{event.preventDefault();$('sidebar').classList.add('drag-over');};$('sidebar').ondragleave=()=>$('sidebar').classList.remove('drag-over');$('sidebar').ondrop=event=>{event.preventDefault();$('sidebar').classList.remove('drag-over');if(state.desktop)return;for(const file of event.dataTransfer.files){const path=file.pywebviewFullPath||file.path;if(path)safely(()=>addFolder(path));}};
-  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;if(event.detail.expanded)state.expanded=new Set(event.detail.expanded);else state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
+  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;if(event.detail.expanded)state.expanded=new Set(event.detail.expanded);else state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();refreshFolderSearch();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
   await renderTree();await renderSmartAlbums();if(boot.state.current&&state.roots.length)await openFolder(boot.state.current);
 }
 document.addEventListener('DOMContentLoaded',()=>safely(init));

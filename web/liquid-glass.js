@@ -4,7 +4,7 @@
   const token = window.HAVEN_TOKEN;
   const asset = path => `${path}?token=${encodeURIComponent(token)}`;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  const surfaces = '#sidebar, .glass:not(.toolbar), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row, #toast, .panel-dialog, input[role="switch"], #folder-path';
+  const surfaces = '#sidebar, .glass:not(.toolbar), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row, .folder-search-result, #toast, .panel-dialog, input[role="switch"], #folder-path';
   const springs = new WeakMap();
   let program, canvas, ctx, scene, blurredScene, blurCtx, lastTheme, themeFade;
   let pointer = {x: -200, y: -200}, cursorTarget = {x: -200, y: -200}, cursorVisible = false, hover = null, pressed = null;
@@ -226,9 +226,8 @@
       const candidates=surfaceNodes.filter(node=>node.tagName==='BUTTON'||node.classList.contains('tree-row'));
       if(!root)candidates.push(...document.querySelectorAll('#filters button'));
       for(const node of candidates) {
-        // The filter popover is a DOM layer above the shared WebGL canvas.
-        // Keep its pointer cursor in the DOM so it cannot be painted underneath the panel.
-        if(node.closest('#metadata-filter'))continue;
+        // Opaque floating panels cover the shared WebGL canvas, so their cursor stays in the DOM layer.
+        if(node.closest('#metadata-filter, #bulk-toolbar'))continue;
         if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
         const bounds=node.getBoundingClientRect();
         if(!visibleWithinScrollers(node,bounds))continue;
@@ -297,7 +296,7 @@
       const menu=document.getElementById('context-menu');
       const menuBounds=!menu.hidden&&menu.getBoundingClientRect();
       const overMenu=menuBounds&&cursorTarget.x>=menuBounds.left-12&&cursorTarget.x<=menuBounds.right+12&&cursorTarget.y>=menuBounds.top-12&&cursorTarget.y<=menuBounds.bottom+12;
-      const domLayer=hover?.closest?.('#metadata-filter')||overMenu;
+      const domLayer=hover?.closest?.('#metadata-filter, #bulk-toolbar')||overMenu;
       cursorElement?.classList.toggle('is-gpu-free',cursorVisible&&!activeDialog&&(!mergedCursor||domLayer));
     }
     const drawCursor = cursorVisible && root && activeDialog===root && !mergedCursor;

@@ -1,141 +1,122 @@
-# Haven · 本地一站式照片中枢
+# Haven
 
 <p align="center">
-  <img src="./docs/logo.png" alt="Haven Logo" width="160">
-</p>
-<p align="center">
-  <strong>无云端上传 · 纯本地隐私 · 液态玻璃原生 UI · 沉浸式影像管理</strong>
+  <img src="docs/logo.png" alt="Haven 图标" width="128">
 </p>
 
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6?style=flat-square&logo=windows&logoColor=white">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white">
-  <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
-  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-100%25%20Local-blueviolet?style=flat-square">
+  <strong>Windows 本地照片与视频管理工具</strong><br>
+  不上传，不导入，把散落在硬盘各处的照片收进一个顺滑入口。
 </p>
 
+> 你还在 C 盘、D 盘、下载文件夹、相机导出目录之间来回翻找照片吗？  
+> 你还在资源管理器里打开几百张照片，然后看着它转圈、卡死、未响应吗？  
+> **Haven 就是为这些瞬间准备的。**
 
-
-> **无云端上传 · 纯本地隐私 · 液态玻璃原生 UI · 沉浸式影像管理**
-
-Haven 是一款面向 **Windows** 的轻量化本地照片、视频管理工具，基于 **Python + WebView2 + WebGL2** 构建，搭载自研苹果液态玻璃交互体系。全程无后台遥测、无强制云同步、不上传任何本地影像数据，仅版本更新功能需联网，守护你的影像隐私。
-
-<p align="left">
-  <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6?style=flat-square&logo=windows&logoColor=white">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white">
-  <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
-  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-100%25%20Local-blueviolet?style=flat-square">
-</p>
+Haven 直接浏览电脑上的文件夹，不要求你把照片导入专用图库，也不会上传影像。它把不同磁盘、不同目录中的照片集中到一个快速、清爽的界面里，让你搜索、筛选、评分、打标签、看原图。界面支持深浅主题和液态玻璃效果；无法使用 WebGL2 时，会自动回退为普通磨砂玻璃样式。
 
 ---
 
-## 📑 目录
+## 为什么是 Haven？
 
-- [✨ 核心特色](#-核心特色)
-- [🖥️ 快速开始](#️-快速开始)
-- [📌 基础功能](#-基础功能)
-- [🔄 更新机制](#-更新机制)
-- [📖 开发文档](#-开发文档)
-- [📄 开源许可](#-开源许可)
-- [⭐ 关于项目](#-关于项目)
+- **散落各处的照片，统一入口浏览**  
+  添加多个照片目录，展开目录树，或搜索尚未展开的子文件夹。照片不必搬家，原图留在原处，Haven 帮你把它们找回来。
 
----
+- **数千张照片，依旧顺滑**  
+  照片网格只渲染当前屏幕附近的卡片，不会一次性把几千张缩略图全部画出来。扫描结果、缩略图和 RAW 等格式的预览会被缓存，大目录二次打开更快。
 
-## ✨ 核心特色
+- **不导入、不上传、不打扰原文件**  
+  原始影像保留在原目录。Haven 只在你需要时读取、预览和整理，适合希望保留文件夹结构的用户。
 
-| 特色 | 说明 |
-| :--- | :--- |
-| **极致液态玻璃交互** | 基于 WebGL2 着色器实现真实折射、色散、菲涅尔高光、动态指针反光；原生适配深浅色主题，无第三方框架冗余；低性能设备自动降级 CSS 磨砂玻璃，兼顾颜值与流畅度。 |
-| **零干扰沉浸式体验** | 弱化 UI 遮挡，优先展示影像本身；闲置界面自动淡化，专注照片、视频预览与管理。 |
-| **全格式影像兼容** | 图片：JPG / PNG / WebP / HEIC / TIFF / GIF；相机 RAW：CR2 / NEF / ARW / DNG 等；视频：MP4 / MOV / MKV 预览与抽帧。 |
-| **纯本地隐私优先** | 所有影像文件、缓存、索引均保存在本地磁盘，不读取隐私信息、不联网上传原图，全程离线可用。 |
-| **智能高效管理** | 多目录挂载、实时增量索引、虚拟滚动懒加载、可调节网格布局，支持搜索、筛选、排序，支持星级、收藏、旗标、颜色标签和标签功能，智能相册等，海量图库依旧流畅。 |
-| **稳定自动更新** | 独立更新器设计，支持版本校验、SHA256 完整性校验、更新失败回滚，安全无痛迭代升级。 |
+- **像整理音乐一样整理照片**  
+  评分、标签、颜色标签、收藏、旗帜、Rejected 状态、智能相册，全都围绕你已有的目录工作。
 
 ---
 
-## 🖥️ 快速开始
+## 性能：为大量照片而生
 
-### 系统依赖
+Haven 不是把几千张原图一次性塞进内存，而是：
 
-| 项目 | 要求 |
-| :--- | :--- |
-| **适配系统** | Windows 10 / Windows 11 (x64) |
-| **必需运行环境** | [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)（绝大多数新版 Windows 已预装，缺失可免费安装） |
+- **视口虚拟化**：照片网格只渲染当前屏幕附近的卡片，滚动时按需加载。
+- **多级缓存**：扫描索引、缩略图、RAW 预览都会被缓存，减少重复扫描和解码。
+- **按需读取原图**：浏览列表时不会把所有大图全部载入，查看照片时才读取原图。
+- **跨目录智能查找**：智能相册可组合筛选条件，在已添加的目录中跨文件夹查找照片。
 
-### 使用正式打包版（推荐普通用户）
-
-1. 前往 **Releases** 下载最新版 `Haven-win64.zip`
-2. 完整解压至 **非系统、可写目录**（如 `D:\Apps\Haven`）
-3. ⚠️ 务必保留 `_internal/`、`updater.exe`、`version.txt` 全部文件，**不可单独移动 `Haven.exe`**
-4. 双击 `Haven.exe` 即可启动使用
-5. 创建 `Haven.exe` 快捷方式到桌面更便捷
-
-### 源码运行（开发者模式）
-
-> 本地开发、调试需 **Python 3.14** 环境，项目统一使用虚拟环境管理依赖。
-
-```bash
-# 初始化虚拟环境
-python -m venv venv
-
-# 安装全部依赖
-venv\Scripts\python.exe -m pip install -r requirements.txt
-
-# 启动程序
-venv\Scripts\python.exe main.py
-```
+所以，哪怕一个文件夹里有数千张照片，浏览、筛选、切换目录，也不用等到天荒地老。
 
 ---
 
-## 📌 基础功能
+## 主要功能
 
-- **多目录管理** — 无限挂载本地 / 移动硬盘目录，自动监听文件变动，支持子目录递归浏览
-- **沉浸式预览** — 大屏原图预览、滚轮缩放、鼠标拖拽平移、方向键切换、`ESC` 快速关闭
-- **基础文件操作** — 资源管理器定位、默认程序打开、复制路径、回收站删除（带二次确认）
-- **多媒体适配** — 视频抽帧预览、内嵌播放，支持 Live Photo / Motion Photo 动态影像识别
-- **个性化主题** — 深色 / 浅色双主题，原生液态玻璃动态 UI，无边框轻量化窗口
-- **智能缓存机制** — 增量索引、缩略图缓存、过期自动失效，大幅提升重复打开速度
+- **按文件夹浏览**  
+  添加多个照片目录，展开目录树，或在侧边栏搜索尚未展开的子文件夹。照片列表上方会显示当前目录的直属子文件夹；侧边栏宽度可拖动调整。
 
----
+- **查找与整理**  
+  按文件名搜索；按格式、评分、标签、颜色标签、收藏、旗帜及 Rejected 状态筛选；按名称、日期、大小等排序。智能相册可以组合这些条件，跨已添加的目录查找照片。
 
-## 🔄 更新机制
+- **批量处理**  
+  进入选择模式后，可批量设置评分、标签、颜色标签和状态，也可以把选中的照片拖到侧边栏中的其他文件夹。
 
-- 🚀 程序启动静默检测官方新版本，支持手动检查更新
-- 🔐 完整校验更新包 **大小 + SHA256 哈希值**，杜绝损坏、篡改安装包
-- 🧩 独立更新进程，支持更新失败 **自动回滚**，不损坏本地程序与用户设置
-- ⚙️ 可自由开启 / 关闭自动更新，**无强制升级**
+- **全屏查看**  
+  查看照片详情，缩放、平移和旋转预览；在底部工具栏直接修改评分、收藏、旗帜、Rejected、标签和颜色标签。视频可在支持的编码下内嵌播放。
 
----
-
-## 📖 开发文档
-
-项目架构、文件说明、打包流程、自动化测试、更新机制、报错排查等完整技术文档：
-
-➡️ **[完整开发文档 →](./docs/开发文档.md)**
-
-适合二次开发、功能迭代、本地打包、源码学习查阅。
+- **本地缓存**  
+  扫描结果、缩略图和 RAW 等格式的预览会被缓存；照片网格只渲染当前屏幕附近的卡片。
 
 ---
 
-## 📄 开源许可
+## 下载与安装
 
-本项目基于 **MIT License** 开源，可自由学习、二次开发、非商用 / 商用使用。
+Haven 面向 **Windows 10/11 x64**，需要 Microsoft Edge WebView2 Runtime。新版 Windows 通常已安装；缺失时可从 [Microsoft 官方页面](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
 
-第三方依赖、着色器代码、图标库许可详见 **[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)**。
+1. 从 [Releases](https://github.com/christo112233/Haven/releases/latest) 下载 `Haven-win64.zip`。
+2. 完整解压到有写入权限的位置，例如 `D:\Apps\Haven`。
+3. 运行 `Haven.exe`。
 
----
+> 请保留解压后的 `updater.exe`、`version.txt` 和 `_internal/`，不要单独移动主程序。  
+> 发布包已包含所需的 Python 运行环境。
 
-## ⭐ 关于项目
-
-Haven 致力于打造一款 **隐私安全、颜值极致、流畅好用** 的本地影像管理工具。摒弃臃肿冗余功能，专注「纯粹看图、高效管理、极致视觉体验」。
-
-后续将持续迭代更多实用功能，敬请期待。
-
-> 💡 如果 Haven 对你有帮助，欢迎点一个 **Star** ⭐ 支持项目持续更新～
+源码运行、测试和构建方法见[开发文档](docs/开发文档.md)。
 
 ---
 
-<p align="center">
-  <sub>Made with ❤️ by Haven</sub>
-</p>
+## 快速上手
+
+1. 点击侧边栏「文件夹」旁的添加按钮选择目录，也可以把文件夹拖入侧边栏。
+2. 点击文件夹浏览其中的照片；勾选「包含子文件夹」可将下级目录中的影像一并列出。点击照片进入全屏预览。
+3. 用顶部搜索和筛选控件缩小结果范围；通过照片右键菜单或全屏工具栏设置评分与标签。点击选择按钮可一次处理多张照片。
+
+### 全屏快捷键
+
+| 按键 | 操作 |
+| --- | --- |
+| `←` / `→` 或 `A` / `D` | 上一张 / 下一张 |
+| `Space` | 适应窗口 |
+| `F` | 展开或收起详情 |
+| `Esc` | 关闭预览 |
+
+滚轮可缩放照片，拖动可平移。查看器中的旋转仅改变预览，不修改原文件。删除操作会先要求确认，然后将文件移入系统回收站。
+
+---
+
+## 格式与数据
+
+Haven 识别常见图片（JPG、PNG、WebP、BMP、GIF、TIFF）、HEIC/HEIF、常见相机 RAW（如 CR2、CR3、NEF、ARW、DNG）及 MP4、MOV、MKV 等视频。RAW 的具体机型取决于 LibRaw；视频能否在窗口内播放取决于 WebView2 对容器和编码的支持，不支持时可交给系统默认程序打开。支持部分同名照片与视频配对的 Live Photo、Motion Photo。
+
+原始影像保留在原目录。缩略图、预览和扫描索引位于各照片目录下的 `.Haven/`；评分、标签、收藏、旗帜、颜色标签及智能相册位于程序目录的 `haven-metadata.sqlite3`；文件夹和外观等设置位于 `haven-settings.json`。
+
+只读照片目录仍可浏览，但无法持久保存该目录的缓存。移除一个图库根目录不会删除其照片或缓存。
+
+---
+
+## 联网与更新
+
+浏览和整理照片可离线进行。联网仅用于检查或下载 GitHub Releases 更新，以及主动打开更新历史。自动检查更新可以在设置中关闭；更新成功后，暂存的旧程序备份会被清理。
+
+建议将整个程序放在可写目录，以便保存设置和安装更新。
+
+---
+
+## 许可
+
+Haven 使用 [MIT License](LICENSE)。第三方库、图标和着色器的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -41,6 +41,27 @@ def children(folder):
     }
 
 
+def find_folders(roots, query, limit=100):
+    """Search directory names beneath configured roots without scanning media."""
+    matches = []
+    needle = query.casefold()
+    for root in roots:
+        pending = [Path(root)]
+        while pending:
+            folder = pending.pop()
+            if needle in folder.name.casefold():
+                matches.append({"name": folder.name, "path": str(folder), "parent": str(folder.parent)})
+                if len(matches) > limit:
+                    return {"items": matches[:limit], "truncated": True}
+            try:
+                with os.scandir(folder) as entries:
+                    children = [Path(entry.path) for entry in entries if entry.is_dir(follow_symlinks=False) and visible(entry)]
+            except OSError:
+                continue
+            pending.extend(sorted(children, key=lambda path: path.name.casefold(), reverse=True))
+    return {"items": matches, "truncated": False}
+
+
 def scan(folder, recursive=False):
     items, warnings = [], []
     stack = [Path(folder)]

@@ -180,6 +180,14 @@ class Api:
     def folders(self, path):
         return scanner.children(self.authorize(path))
 
+    def search_folders(self, query):
+        if not isinstance(query, str):
+            raise ValueError("搜索内容无效")
+        query = query.strip()
+        if not query:
+            return {"items": [], "truncated": False}
+        return scanner.find_folders(self.state["roots"], query)
+
     def open_folder(self, path, recursive=False):
         folder = self.authorize(path)
         if not folder.is_dir():

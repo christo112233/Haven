@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys
 
-VERSION = "2.1.1"
+VERSION = "2.1.2"
 CACHE_VERSION = 1
 CACHE_NAME = ".Haven"
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent

@@ -84,6 +84,17 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(listing["count"], 3)
         self.assertEqual([(child["name"], child["count"]) for child in listing["children"]], [("sub", 1)])
 
+    def test_folder_search_finds_collapsed_descendants(self):
+        (self.root / "Trips" / "2024" / "Raw").mkdir(parents=True)
+        (self.root / "Trips archive").mkdir()
+        (self.root / ".git" / "Trips hidden").mkdir(parents=True)
+        result = scanner.find_folders([self.root], "TRIPS")
+        self.assertEqual([item["name"] for item in result["items"]], ["Trips", "Trips archive"])
+        self.assertFalse(result["truncated"])
+        limited = scanner.find_folders([self.root], "trip", limit=1)
+        self.assertEqual(len(limited["items"]), 1)
+        self.assertTrue(limited["truncated"])
+
     def test_photo_metadata_batch_updates_and_path_migration(self):
         from metadata_store import MetadataStore
         first, second = self.photo("first.jpg"), self.photo("second.jpg")
