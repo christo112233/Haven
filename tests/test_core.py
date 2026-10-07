@@ -597,5 +597,98 @@ class CoreTests(unittest.TestCase):
                 api.pool.shutdown(); api.raw_pool.shutdown()
 
 
+    def test_burst_stacking_grouping(self):
+        t0 = 1_700_000_000.0
+
+        def item(name, date, shutter=None):
+            return {"path": str(self.root / name), "name": name, "ext": ".jpg", "date": date,
+                    "kind": "image", "shutter": shutter, "size": 100, "mtime": date,
+                    "width": 100, "height": 100}
+
+        items = [
+            item("b1.jpg", t0, "1/1000"),
+            item("b2.jpg", t0 + 0.3, "1/1000"),
+            item("b3.jpg", t0 + 0.6, "1/1000"),
+            item("solo.jpg", t0 + 3.0, "1/1000"),
+            item("star1.jpg", t0 + 30.0, "20"),
+            item("star2.jpg", t0 + 51.0, "20"),
+        ]
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                grouped = api._group_stacks([dict(i) for i in items])
+                by_name = {i["name"]: i for i in grouped}
+                self.assertEqual(by_name["b1.jpg"]["stack_size"], 3)
+                self.assertEqual(by_name["b2.jpg"]["stack_id"], by_name["b1.jpg"]["stack_id"])
+                self.assertEqual(by_name["solo.jpg"]["stack_size"], 1)
+                self.assertEqual(by_name["star1.jpg"]["stack_size"], 2)
+                self.assertTrue(by_name["b1.jpg"]["stack_cover"])
+                self.assertFalse(by_name["b2.jpg"]["stack_cover"])
+                self.assertEqual(by_name["b1.jpg"]["stack_members"], [str(self.root / n) for n in ["b1.jpg", "b2.jpg", "b3.jpg"]])
+                self.assertEqual(by_name["star2.jpg"]["stack_id"], by_name["star1.jpg"]["stack_id"])
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_page_stack_and_stack_items(self):
+        t0 = 1_700_000_000.0
+
+        def item(name, date):
+            return {"path": str(self.root / name), "name": name, "ext": ".jpg", "date": date,
+                    "kind": "image", "shutter": "1/1000", "size": 100, "mtime": date,
+                    "width": 100, "height": 100}
+
+        items = [item("a.jpg", t0), item("b.jpg", t0 + 0.4), item("c.jpg", t0 + 5.0)]
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                job = {"id": "job1", "state": "ready", "items": items, "total": len(items),
+                       "done": len(items), "warnings": [], "revision": 0}
+                api.jobs = {"job1": job}
+                result = api.page("job1", stack=True)
+                self.assertEqual(result["filtered"], 2)
+                self.assertEqual(len(result["items"]), 2)
+                self.assertTrue(all(i["stack_cover"] for i in result["items"]))
+                burst = next(i for i in result["items"] if i["stack_size"] == 2)
+                members = api.stack_items("job1", burst["stack_id"])
+                self.assertEqual([m["name"] for m in members], ["a.jpg", "b.jpg"])
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_raw_metadata_extraction(self):
+        from unittest.mock import MagicMock
+        from datetime import datetime
+        import raw_handler
+
+        class FakeOther:
+            timestamp = datetime(2024, 5, 6, 12, 0, 30)
+            shutter_speed = 0.001
+            aperture = 2.8
+            iso_speed = 100.0
+
+        class FakeLens:
+            make = "Nikon"
+            model = "AF-S 24-70mm"
+
+        class FakeRaw:
+            sizes = MagicMock(width=6000, height=4000)
+            other = FakeOther()
+            lens = FakeLens()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        with patch("rawpy.imread", return_value=FakeRaw()):
+            data = raw_handler.metadata("x.nef")
+        self.assertEqual((data["width"], data["height"]), (6000, 4000))
+        self.assertEqual(data["date"], datetime(2024, 5, 6, 12, 0, 30).timestamp())
+        self.assertEqual(data["shutter"], "1/1000")
+        self.assertEqual(data["aperture"], "2.8")
+        self.assertEqual(data["iso"], "100")
+        self.assertEqual(data["lens"], "Nikon AF-S 24-70mm")
+
+
 if __name__ == "__main__":
     unittest.main()
