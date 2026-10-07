@@ -4,7 +4,7 @@
   const token = window.HAVEN_TOKEN;
   const asset = path => `${path}?token=${encodeURIComponent(token)}`;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  const surfaces = '#sidebar, .glass:not(.toolbar), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row, .folder-search-result, #toast, .panel-dialog, input[role="switch"], #folder-path';
+  const surfaces = '#sidebar, .glass:not(.toolbar):not(#context-menu), .search, .icon-button, .primary, .secondary, .sort-controls, .tree-row, .folder-search-result, #toast, .panel-dialog, input[role="switch"], #folder-path';
   const springs = new WeakMap();
   let program, canvas, ctx, scene, blurredScene, blurCtx, lastTheme, themeFade;
   let pointer = {x: -200, y: -200}, cursorTarget = {x: -200, y: -200}, cursorVisible = false, hover = null, pressed = null;
@@ -89,16 +89,24 @@
     context.fillStyle = vignette; context.fillRect(0, 0, width, height);
   }
 
+  function snapshotCanvas(source) {
+    const target = document.createElement('canvas');
+    target.width = source.width; target.height = source.height;
+    target.getContext('2d', {alpha: false}).drawImage(source, 0, 0);
+    return target;
+  }
+
+  function beginDialogFade() {
+    if (reducedMotion.matches || !scene || !scene.width || !blurredScene || themeFade) return;
+    const light = Number(document.documentElement.dataset.theme === 'light');
+    themeFade = {fromScene: snapshotCanvas(scene), fromBlur: snapshotCanvas(blurredScene), fromLight: light, toLight: light, progress: 0, start: performance.now(), duration: 240, snapshot: snapshotCanvas};
+    lastInteraction = performance.now(); sceneDirty = true;
+  }
+
   function beginThemeFade() {
     if (reducedMotion.matches || !scene || !scene.width) return;
     const fromLight=themeFade ? themeFade.fromLight+(themeFade.toLight-themeFade.fromLight)*(themeFade.progress||0) : Number(lastTheme==='light');
-    const snapshot = source => {
-      const target=document.createElement('canvas');
-      target.width=source.width;target.height=source.height;
-      target.getContext('2d',{alpha:false}).drawImage(source,0,0);
-      return target;
-    };
-    themeFade = {fromScene:snapshot(scene),fromBlur:snapshot(blurredScene),fromLight,toLight:Number(document.documentElement.dataset.theme==='light'),progress:0,start:performance.now(),duration:520,snapshot};
+    themeFade = {fromScene:snapshotCanvas(scene),fromBlur:snapshotCanvas(blurredScene),fromLight,toLight:Number(document.documentElement.dataset.theme==='light'),progress:0,start:performance.now(),duration:520,snapshot:snapshotCanvas};
     lastInteraction = performance.now(); sceneDirty = true;
   }
 
@@ -146,8 +154,6 @@
       }else ctx.drawImage(source,rect.x+(rect.width-w)/2,rect.y+(rect.height-h)/2,w,h);
       ctx.restore();
     }
-    // Dialogue panels sample a calm, evenly dimmed backdrop instead of the photos behind them.
-    if(activeDialog&&activeDialog.id!=='viewer'){ctx.fillStyle=theme==='dark'?'rgba(4,17,28,.55)':'rgba(238,246,251,.62)';ctx.fillRect(0,0,width,height);}
     if(blurredScene.width!==width||blurredScene.height!==height){blurredScene.width=width;blurredScene.height=height;}
     blurCtx.filter='blur(20px)';blurCtx.drawImage(scene,0,0);blurCtx.filter='none';
     if(themeFade){
@@ -394,21 +400,22 @@
     for(const dialog of document.querySelectorAll('dialog')) {
       const show=dialog.showModal.bind(dialog),close=dialog.close.bind(dialog);
       let closing=null;
-      dialog.showModal=()=>{if(closing){clearTimeout(closing);closing=null;}if(dialog.open)return;show();activeDialog=dialog;syncCursorLayer(dialog);dialog.getAnimations().forEach(animation=>animation.cancel());sceneDirty=true;refreshNodes();if(!reducedMotion.matches){dialog.animate([{opacity:0,transform:'translateY(18px) scale(.965)'},{opacity:1,transform:'translateY(0) scale(1)'}],{duration:360,easing:'cubic-bezier(.2,.85,.2,1)'});diagnostics.animations++;}};
+      dialog.showModal=()=>{if(closing){clearTimeout(closing);closing=null;}if(dialog.open)return;dialog.classList.remove('is-closing');show();activeDialog=dialog;syncCursorLayer(dialog);dialog.getAnimations().forEach(animation=>animation.cancel());beginDialogFade();sceneDirty=true;refreshNodes();if(!reducedMotion.matches){dialog.animate([{opacity:0,transform:'translateY(18px) scale(.965)'},{opacity:1,transform:'translateY(0) scale(1)'}],{duration:360,easing:'cubic-bezier(.2,.85,.2,1)'});diagnostics.animations++;}};
       const finishClose=value=>{
         close(value);closing=null;
+        dialog.classList.remove('is-closing');
         activeDialog=[...document.querySelectorAll('dialog[open]')].at(-1)||null;
         syncCursorLayer(activeDialog);
         sceneDirty=true;
         if(diagnostics.ready)animate(performance.now(),true);
       };
-      dialog.addEventListener('close',()=>{activeDialog=[...document.querySelectorAll('dialog[open]')].at(-1)||null;syncCursorLayer(activeDialog);sceneDirty=true;if(diagnostics.ready)animate(performance.now(),true);});
+      dialog.addEventListener('close',()=>{activeDialog=[...document.querySelectorAll('dialog[open]')].at(-1)||null;syncCursorLayer(activeDialog);beginDialogFade();sceneDirty=true;if(diagnostics.ready)animate(performance.now(),true);});
       dialog.close=value=>{
         if(!dialog.open)return;
         if(reducedMotion.matches){finishClose(value);return;}
-        // Fade the panel and its backdrop together, so closing never snaps shut.
+        dialog.classList.add('is-closing');
+        // Fade the panel; its ::backdrop fades via the CSS transition on dialog.is-closing::backdrop.
         dialog.animate([{opacity:1,transform:'translateY(0) scale(1)'},{opacity:0,transform:'translateY(9px) scale(.988)'}],{duration:200,easing:'cubic-bezier(.4,0,.7,.4)',fill:'forwards'});
-        try{dialog.animate([{opacity:1},{opacity:0}],{duration:200,easing:'ease-out',pseudoElement:'::backdrop'});}catch(error){}
         closing=setTimeout(()=>finishClose(value),195);
       };
     }

@@ -461,5 +461,116 @@ class CoreTests(unittest.TestCase):
             self.assertIn("offline", result["error"])
 
 
+    def _wait_export(self, api, job_id):
+        job = api.export_progress(job_id)
+        until = time.monotonic() + 15
+        while time.monotonic() < until and job["state"] == "running":
+            time.sleep(.05)
+            job = api.export_progress(job_id)
+        return job
+
+    def test_export_copy_copies_and_handles_collisions(self):
+        first = self.photo("dup.jpg")
+        second = self.photo("sub/dup.jpg")
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.add_folder(str(self.root))
+                target = self.root / "export"
+                result = api.export_photos([str(first), str(second)], str(target), {"mode": "copy", "collision": "rename"})
+                job = self._wait_export(api, result["job"])
+                self.assertEqual(job["state"], "done")
+                self.assertEqual(job["copied"], 2)
+                self.assertEqual(job["failed"], 0)
+                self.assertEqual(sorted(p.name for p in target.iterdir()), ["dup (1).jpg", "dup.jpg"])
+                self.assertTrue(first.is_file())
+                self.assertTrue(second.is_file())
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_export_move_updates_store_and_clears_cache(self):
+        photo = self.photo("move.jpg")
+        thumbs.get(scanner.scan(self.root)[0][0])
+        self.assertTrue((self.root / ".Haven" / "thumbs" / "move.jpg.webp").is_file())
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.add_folder(str(self.root))
+                target = self.root / "exported"
+                result = api.export_photos([str(photo)], str(target), {"mode": "move"})
+                job = self._wait_export(api, result["job"])
+                self.assertEqual(job["state"], "done")
+                self.assertEqual(job["moved"], 1)
+                self.assertFalse(photo.exists())
+                self.assertTrue((target / "move.jpg").is_file())
+                self.assertFalse((self.root / ".Haven" / "thumbs" / "move.jpg.webp").is_file())
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_export_target_validation(self):
+        photo = self.photo("target.jpg")
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.add_folder(str(self.root))
+                with self.assertRaises(ValueError):
+                    api.export_photos([str(photo)], "", {})
+                with self.assertRaises(PermissionError):
+                    api.export_photos([str(photo)], str(self.root / ".Haven" / "sub"), {})
+                with self.assertRaises(ValueError):
+                    api.export_photos([str(photo)], str(photo), {})
+                with self.assertRaises(ValueError):
+                    api.export_photos([str(photo)], str(self.root / "export"), {"collision": "bad"})
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_open_external_launches_editor_with_paths(self):
+        photo = self.photo("open.jpg")
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.add_folder(str(self.root))
+                with patch("subprocess.Popen") as popen, patch("os.startfile") as startfile:
+                    api.open_external([str(photo)], "default")
+                    startfile.assert_called_once_with(str(photo))
+                    popen.assert_not_called()
+                dummy = self.root / "editor.exe"; dummy.write_text("x")
+                api.state["external_editor"] = {"id": "custom", "name": "TestEditor", "exe": str(dummy)}
+                with patch("subprocess.Popen") as popen:
+                    api.open_external([str(photo)], "custom")
+                    popen.assert_called_once_with([str(dummy), str(photo)])
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_detect_editors_returns_default_and_windows_entries(self):
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                editors = api.detect_editors()
+                ids = {editor["id"] for editor in editors}
+                self.assertIn("default", ids)
+                self.assertTrue(all("name" in editor and "available" in editor for editor in editors))
+                with patch("os.name", "posix"):
+                    self.assertEqual([editor["id"] for editor in api.detect_editors()], ["default"])
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_session_and_export_mode_settings(self):
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.settings({"export_mode": "move"})
+                self.assertEqual(api.state["export_mode"], "move")
+                with self.assertRaises(ValueError):
+                    api.settings({"export_mode": "bad"})
+                session = {"location": str(self.root), "name": "round", "target": str(self.root / "round"), "picks": []}
+                api.settings({"session": session})
+                self.assertEqual(api.state["session"]["name"], "round")
+                with self.assertRaises(ValueError):
+                    api.settings({"session": "not-a-dict"})
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

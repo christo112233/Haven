@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 import uuid
@@ -52,6 +53,7 @@ class Api:
             except OSError:
                 pass
         self.jobs = {}
+        self.export_jobs = {}
         self.lock = threading.RLock()
         self.scan_lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4), thread_name_prefix="haven-media")
@@ -87,7 +89,11 @@ class Api:
         return {"ok": True}
 
     def settings(self, changes):
-        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency"}
+        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency", "external_editor", "export_folder", "export_mode", "session"}
+        if "export_mode" in changes and changes.get("export_mode") not in {"copy", "move"}:
+            raise ValueError("导出模式无效")
+        if "session" in changes and changes.get("session") is not None and not isinstance(changes.get("session"), dict):
+            raise ValueError("选片会话数据无效")
         with self.lock:
             self.state.update({key: value for key, value in changes.items() if key in allowed})
             try:
@@ -187,6 +193,13 @@ class Api:
         if not query:
             return {"items": [], "truncated": False}
         return scanner.find_folders(self.state["roots"], query)
+
+    def pick_folder(self):
+        if self.window is None:
+            raise ValueError("文件夹选择仅适用于桌面程序")
+        import webview
+        selected = self.window.create_file_dialog(webview.FileDialog.FOLDER)
+        return {"path": selected[0] if selected else None}
 
     def open_folder(self, path, recursive=False):
         folder = self.authorize(path)
@@ -534,6 +547,236 @@ class Api:
         else:
             raise ValueError("未知操作")
         return {"ok": True}
+
+    def detect_editors(self):
+        """Detect installed photo editors (Photoshop / Lightroom) on Windows."""
+        editors = [{"id": "default", "name": "系统默认程序", "exe": None, "available": True}]
+        if os.name != "nt":
+            return editors
+        try:
+            import winreg
+        except ImportError:
+            return editors
+
+        def app_path(exe_name):
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + exe_name) as key:
+                    return winreg.QueryValueEx(key, None)[0]
+            except OSError:
+                return None
+
+        for editor_id, name, exe_name in (("photoshop", "Adobe Photoshop", "Photoshop.exe"), ("lightroom", "Lightroom Classic", "lightroom.exe")):
+            exe = app_path(exe_name)
+            if not exe and editor_id == "photoshop":
+                exe = self._adobe_install(r"SOFTWARE\Adobe\Photoshop", "ApplicationPath", "Photoshop.exe")
+            if not exe and editor_id == "lightroom":
+                exe = self._adobe_install(r"SOFTWARE\Adobe\Adobe Lightroom", "InstallDir", "lightroom.exe")
+            editors.append({"id": editor_id, "name": name, "exe": exe, "available": bool(exe and Path(exe).is_file())})
+        return editors
+
+    @staticmethod
+    def _adobe_install(root, value_name, exe_name):
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as key:
+                index = 0
+                while True:
+                    try:
+                        subkey = winreg.EnumKey(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    try:
+                        with winreg.OpenKey(key, subkey) as child:
+                            value, _ = winreg.QueryValueEx(child, value_name)
+                        candidate = Path(value) / exe_name
+                        if candidate.is_file():
+                            return str(candidate)
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+        return None
+
+    def _resolve_editor_exe(self, editor_id):
+        if editor_id == "default":
+            return None, "系统默认程序"
+        detected = {editor["id"]: editor for editor in self.detect_editors()}
+        if editor_id in detected and detected[editor_id].get("available"):
+            return detected[editor_id]["exe"], detected[editor_id]["name"]
+        configured = self.state.get("external_editor")
+        if isinstance(configured, dict) and configured.get("exe") and (configured.get("id") == editor_id or editor_id == "custom"):
+            return configured["exe"], configured.get("name", "外部编辑器")
+        raise ValueError("未找到该编辑器，请到设置中配置外部编辑器")
+
+    def open_external(self, paths, editor_id="default"):
+        actuals = [str(self.authorize(path)) for path in paths]
+        if not actuals:
+            raise ValueError("没有要打开的照片")
+        for path in actuals:
+            if not Path(path).is_file() or Path(path).suffix.lower() not in config.IMAGES | config.VIDEOS:
+                raise ValueError("只能打开受支持的媒体文件")
+        exe, name = self._resolve_editor_exe(editor_id)
+        if exe is None:
+            for path in actuals:
+                os.startfile(path)
+        else:
+            if not Path(exe).is_file():
+                raise ValueError(f"未找到程序：{exe}")
+            subprocess.Popen([str(Path(exe)), *actuals])
+        result = {"ok": True, "editor": name, "opened": len(actuals)}
+        if editor_id == "lightroom":
+            result["capability"] = "limited"
+            result["hint"] = "Lightroom 批量打开能力有限，建议改用「导出到文件夹」"
+        return result
+
+    @staticmethod
+    def _validate_export_target(target):
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("请选择导出文件夹")
+        path = Path(target.strip())
+        if path.exists() and not path.is_dir():
+            raise ValueError("导出目标不是文件夹")
+        if any(part.casefold() == config.CACHE_NAME.casefold() for part in path.parts):
+            raise PermissionError("导出文件夹不能位于 Haven 缓存目录内")
+        return path
+
+    def export_photos(self, paths, target, options=None):
+        options = options or {}
+        authorized = [str(self.authorize(path)) for path in paths]
+        if not authorized:
+            raise ValueError("没有要导出的照片")
+        for path in authorized:
+            if not Path(path).is_file() or Path(path).suffix.lower() not in config.IMAGES | config.VIDEOS:
+                raise ValueError("只能导出受支持的媒体文件")
+        target_path = self._validate_export_target(target)
+        mode = options.get("mode", self.state.get("export_mode", "copy"))
+        if mode not in {"copy", "move"}:
+            raise ValueError("导出模式无效")
+        collision = options.get("collision", "rename")
+        if collision not in {"rename", "skip", "overwrite"}:
+            raise ValueError("同名处理方式无效")
+        include_companions = bool(options.get("include_companions", False))
+        preserve_structure = bool(options.get("preserve_structure", False))
+        open_folder_after = bool(options.get("open_folder_after", False))
+        roots = [Path(root).resolve() for root in self.state.get("roots", [])]
+        job_id = uuid.uuid4().hex
+        job = {"id": job_id, "state": "running", "target": str(target_path), "mode": mode, "total": len(authorized), "copied": 0, "moved": 0, "skipped": 0, "failed": 0, "errors": []}
+        with self.lock:
+            self.export_jobs[job_id] = job
+
+        def worker():
+            try:
+                self._run_export(job, authorized, target_path, mode, collision, include_companions, preserve_structure, roots)
+            except Exception as exc:
+                job.update(state="error", error=str(exc))
+            finally:
+                if open_folder_after and target_path.is_dir():
+                    try:
+                        os.startfile(str(target_path))
+                    except OSError:
+                        pass
+        threading.Thread(target=worker, daemon=True).start()
+        return {"job": job_id}
+
+    def _run_export(self, job, sources, target, mode, collision, include_companions, preserve_structure, roots):
+        target.mkdir(parents=True, exist_ok=True)
+        pending = self._with_companions(sources) if include_companions else list(sources)
+        for source in pending:
+            source_path = Path(source)
+            relative = self._relative_for(source_path, preserve_structure, roots)
+            dest_dir = target if relative is None else target / relative
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            destination = dest_dir / source_path.name
+            if destination.exists():
+                if collision == "skip":
+                    job["skipped"] += 1
+                    job["errors"].append(f"跳过：{source_path.name} 目标已存在")
+                    self.emit("export-progress", self._export_snapshot(job))
+                    continue
+                if collision == "rename":
+                    destination = self._renamed_destination(destination)
+                else:
+                    try:
+                        destination.unlink()
+                    except OSError as exc:
+                        job["failed"] += 1
+                        job["errors"].append(f"{source_path.name}: {exc}")
+                        self.emit("export-progress", self._export_snapshot(job))
+                        continue
+            try:
+                if mode == "move":
+                    shutil.move(str(source_path), str(destination))
+                    self.store.move_path(str(source_path), str(destination))
+                    self._clear_file_cache(source_path)
+                    job["moved"] += 1
+                else:
+                    shutil.copy2(str(source_path), str(destination))
+                    job["copied"] += 1
+            except OSError as exc:
+                job["failed"] += 1
+                job["errors"].append(f"{source_path.name}: {exc}")
+            self.emit("export-progress", self._export_snapshot(job))
+        job["state"] = "done"
+        self.emit("export-progress", self._export_snapshot(job))
+
+    @staticmethod
+    def _with_companions(sources):
+        ordered, seen = [], set()
+        for source in sources:
+            path = Path(source)
+            for candidate in Api._companion_candidates(path):
+                key = os.path.normcase(os.path.abspath(str(candidate)))
+                if key not in seen:
+                    seen.add(key)
+                    ordered.append(str(candidate))
+        return ordered
+
+    @staticmethod
+    def _companion_candidates(path):
+        yield path
+        if path.suffix.lower() not in config.IMAGES:
+            return
+        for ext in config.IMAGES:
+            candidate = path.with_suffix(ext)
+            if candidate.is_file() and os.path.normcase(str(candidate)) != os.path.normcase(str(path)):
+                yield candidate
+
+    @staticmethod
+    def _renamed_destination(destination):
+        parent, stem, suffix = destination.parent, destination.stem, destination.suffix
+        index = 1
+        while True:
+            candidate = parent / f"{stem} ({index}){suffix}"
+            if not candidate.exists():
+                return candidate
+            index += 1
+
+    @staticmethod
+    def _relative_for(path, preserve_structure, roots):
+        if not preserve_structure:
+            return None
+        resolved = Path(path).resolve()
+        for root in roots:
+            try:
+                return resolved.parent.relative_to(root)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _export_snapshot(job):
+        return {"job": job["id"], "state": job["state"], "target": job["target"], "mode": job["mode"], "total": job["total"], "copied": job.get("copied", 0), "moved": job.get("moved", 0), "skipped": job.get("skipped", 0), "failed": job.get("failed", 0), "errors": list(job.get("errors", [])), "error": job.get("error")}
+
+    def export_progress(self, job_id=None):
+        with self.lock:
+            if job_id:
+                job = self.export_jobs.get(job_id)
+            else:
+                job = next(iter(self.export_jobs.values()), None) if self.export_jobs else None
+        if not job:
+            return {"state": "idle"}
+        return self._export_snapshot(job)
 
     def emit(self, name, payload):
         if self.window:

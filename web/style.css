@@ -78,7 +78,7 @@ button { cursor: pointer; border: 0; color: inherit; background: transparent; }
 button, select, .search, .glass { -webkit-tap-highlight-color: transparent; }
 button { transition: transform .32s var(--spring), filter .25s, box-shadow .3s, background .3s; }
 button:hover { filter: brightness(1.13); }
-button:active { transform: scale(.92); }
+button:active { transform: scale(.92); filter: brightness(1.24) saturate(1.12); background: color-mix(in srgb, var(--accent) 22%, transparent); }
 button:disabled { opacity: .4; cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #d9fcff; outline-offset: 4px; }
 button svg { pointer-events: none; }
@@ -91,8 +91,8 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; flex-shrink: 0; }
 .icon-button:hover { transform: translateY(-2px) scale(1.07); box-shadow: 0 8px 24px #03253524; }
 .icon-button:active { transform: translateY(1px) scale(.91); }
 .liquid-surface { transition: filter .32s var(--spring), box-shadow .32s ease, background .32s ease, transform .32s var(--spring); }
-button.liquid-surface:hover, .tree-row.liquid-surface:hover, button.liquid-surface.is-pressed { filter: brightness(1.08) drop-shadow(0 0 13px #72e7ff66); }
-button.liquid-surface.is-pressed { filter: brightness(1.16) drop-shadow(0 0 22px #a4f5ffb0); }
+button.liquid-surface:hover, .tree-row.liquid-surface:hover { filter: brightness(1.08) drop-shadow(0 0 13px #72e7ff66); }
+button.liquid-surface.is-pressed, button.liquid-surface:active { filter: brightness(1.3) saturate(1.15) drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 72%, transparent)); }
 .primary, .secondary { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; border-radius: 22px; padding: 11px 19px; font-size: 12px; font-weight: 500; }
 .primary { background: rgb(206 245 255 / calc(.22 * var(--glass-alpha-factor))); border: 1px solid #d4faff7a; color: var(--text); }
 :root[data-theme="light"] .primary { background: rgb(47 127 181 / calc(.13 * var(--glass-alpha-factor))); border-color: #2f7fb552; color: #0f3549; }
@@ -280,7 +280,8 @@ progress { width: 100px; height: 4px; border: 0; border-radius: 4px; appearance:
 progress::-webkit-progress-bar { background: #d3f6ff26; }
 progress::-webkit-progress-value { background: #c7faff; box-shadow: 0 0 8px #b5faff60; transition: width .4s; }
 dialog { color: var(--text); border: 1px solid var(--border-strong); border-radius: 26px; background: var(--panel-fill); backdrop-filter: blur(18px); padding: 0; box-shadow: 0 25px 90px #001b4260,inset 0 1px 0 #ffffff5c; overflow: hidden; }
-dialog::backdrop { background: rgba(4, 20, 32, .24); backdrop-filter: blur(16px) saturate(1.08); -webkit-backdrop-filter: blur(16px) saturate(1.08); animation: backdrop-enter .35s ease both; }
+dialog::backdrop { background: rgba(4, 20, 32, .24); backdrop-filter: blur(16px) saturate(1.08); -webkit-backdrop-filter: blur(16px) saturate(1.08); animation: backdrop-enter .35s ease; transition: opacity .2s ease; }
+dialog.is-closing::backdrop { opacity: 0; }
 :root[data-theme="light"] dialog::backdrop { background: rgba(218, 235, 244, .32); }
 .modal-liquid-canvas { z-index: 0; }
 #viewer .modal-liquid-canvas { z-index: 2; }
@@ -549,4 +550,32 @@ h2 { font-size: 20px; font-weight: 500; margin: 0; }
   .eyebrow { max-width: 224px; }
   .panel-dialog { padding: 23px; }
 }
+/* --- 选片流程与导出 --- */
+.session-button { min-height: 42px; display: inline-flex; align-items: center; gap: 9px; padding: 0 16px; border-radius: 22px; font-size: 12px; font-weight: 500; color: var(--text); flex-shrink: 0; }
+.session-button svg { width: 16px; height: 16px; color: var(--accent); }
+.session-button:hover { transform: translateY(-2px); box-shadow: 0 10px 28px #052b3f30; }
+.session-banner { display: flex; align-items: center; gap: 12px; flex-shrink: 0; margin: 0 4px 4px; padding: 9px 14px; border-radius: 18px; }
+.session-banner > svg { width: 17px; height: 17px; color: var(--accent); flex-shrink: 0; }
+.session-banner-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+#session-title { font-size: 12px; font-weight: 600; }
+.session-target { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.session-banner .secondary, .session-banner .primary { min-height: 34px; padding: 6px 14px; font-size: 11px; }
+.session-banner .secondary svg { width: 13px; height: 13px; }
+.round-pick { position: absolute; right: 9px; top: 9px; z-index: 3; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #0f8a5f; border: 1px solid #c9ffea; color: #f2fff9; box-shadow: 0 2px 9px #06201552; }
+.round-pick svg { width: 14px; height: 14px; stroke-width: 2.6; }
+.path-picker { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.path-picker input { flex: 1; min-width: 0; }
+.path-picker .icon-button { flex-shrink: 0; }
+.session-path-preview { margin: 14px 0 0; font-size: 11px; color: var(--muted); }
+.session-path-preview code { font-family: inherit; color: var(--text); background: color-mix(in srgb, var(--glass-fill) 82%, transparent); padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border); word-break: break-all; }
+.export-target { font-size: 11px; color: var(--text); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.export-hint { margin: 8px 0 0; font-size: 11px; color: #ffd56e; }
+.export-checks { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+.export-checks label { display: flex; gap: 8px; align-items: center; }
+.export-progress { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; }
+.export-progress progress { flex: 1; height: 8px; }
+.export-progress span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+@media (max-width: 760px) { .session-button span { display: none; } .session-button { padding: 0 13px; } }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
