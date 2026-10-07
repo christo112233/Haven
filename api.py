@@ -89,11 +89,18 @@ class Api:
         return {"ok": True}
 
     def settings(self, changes):
-        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency", "external_editor", "export_folder", "export_mode", "session"}
+        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency", "external_editor", "export_folder", "export_mode", "session", "stack", "stack_base_gap", "stack_factor"}
         if "export_mode" in changes and changes.get("export_mode") not in {"copy", "move"}:
             raise ValueError("导出模式无效")
         if "session" in changes and changes.get("session") is not None and not isinstance(changes.get("session"), dict):
             raise ValueError("选片会话数据无效")
+        for key in ("stack_base_gap", "stack_factor"):
+            if key in changes:
+                try:
+                    if float(changes[key]) <= 0:
+                        raise ValueError("堆叠阈值必须是正数")
+                except (TypeError, ValueError):
+                    raise ValueError("堆叠阈值必须是正数")
         with self.lock:
             self.state.update({key: value for key, value in changes.items() if key in allowed})
             try:
@@ -264,19 +271,77 @@ class Api:
             except Exception as exc:
                 job.update(state="error", error=str(exc))
 
-    def page(self, job_id, offset=0, limit=200, query="", kind="all", sort="name", descending=False, filters=None):
+    def page(self, job_id, offset=0, limit=200, query="", kind="all", sort="name", descending=False, filters=None, stack=False):
         with self.lock:
             job = self.jobs.get(job_id)
             if not job:
                 raise ValueError("浏览任务已失效")
             filters = filters or {}
             items = [dict(item) for item in job["items"] if query.casefold() in item["name"].casefold() and (kind == "all" or (kind == "image" and item["kind"] != "video") or item["kind"] == kind) and self._matches_filters(item, filters)]
-            key = sort if sort in {"name", "date", "mtime", "size", "ext"} else "name"
-            items.sort(key=lambda item: (str(item[key]).casefold() if key in {"name", "ext"} else item[key], item["path"]), reverse=descending)
+            if stack:
+                items = [item for item in self._group_stacks(items) if item.get("stack_cover")]
+            else:
+                key = sort if sort in {"name", "date", "mtime", "size", "ext"} else "name"
+                items.sort(key=lambda item: (str(item[key]).casefold() if key in {"name", "ext"} else item[key], item["path"]), reverse=descending)
             offset = max(0, int(offset))
             result = {key: value for key, value in job.items() if key not in {"items", "cancelled"}}
             result.update(items=items[offset:offset + min(200, max(1, int(limit)))], filtered=len(items))
             return result
+
+    @staticmethod
+    def _exposure_seconds(item):
+        shutter = item.get("shutter")
+        if not shutter:
+            return 0.0
+        text = str(shutter)
+        try:
+            if "/" in text:
+                numerator, denominator = text.split("/", 1)
+                return float(numerator) / float(denominator)
+            return float(text)
+        except (ValueError, ZeroDivisionError):
+            return 0.0
+
+    def _group_stacks(self, items):
+        """Adaptive time-based burst grouping into stacks."""
+        if not items:
+            return items
+        base_gap = float(self.state.get("stack_base_gap", 2.0) or 2.0)
+        factor = float(self.state.get("stack_factor", 1.5) or 1.5)
+        date_key = lambda item: (item.get("date") or 0, item.get("path", ""))
+        ordered = sorted(items, key=date_key)
+        stacks = []
+        if ordered:
+            current = [ordered[0]]
+            previous = ordered[0]
+            for item in ordered[1:]:
+                gap = (item.get("date") or 0) - (previous.get("date") or 0)
+                threshold = max(base_gap, self._exposure_seconds(previous) * factor)
+                if gap <= threshold:
+                    current.append(item)
+                else:
+                    stacks.append(current)
+                    current = [item]
+                previous = item
+            stacks.append(current)
+        for stack_id, stack in enumerate(stacks):
+            member_paths = [member.get("path", "") for member in stack] if len(stack) > 1 else None
+            for position, item in enumerate(stack):
+                item["stack_id"] = stack_id
+                item["stack_size"] = len(stack)
+                item["stack_cover"] = position == 0
+                if position == 0 and member_paths is not None:
+                    item["stack_members"] = member_paths
+        return [item for stack in stacks for item in stack]
+
+    def stack_items(self, job_id, stack_id):
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                raise ValueError("浏览任务已失效")
+            items = [dict(item) for item in job["items"]]
+        ordered = self._group_stacks(items)
+        return [item for item in ordered if item.get("stack_id") == stack_id]
 
     @staticmethod
     def _matches_filters(item, filters):

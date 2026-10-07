@@ -11,8 +11,7 @@ def read(path, ext):
     if ext in VIDEOS:
         return video_handler.metadata(path)
     if ext in RAW:
-        width, height = raw_handler.dimensions(path)
-        return {"width": width, "height": height}
+        return raw_handler.metadata(path)
     with Image.open(path) as image:
         exif = image.getexif()
         values = {ExifTags.TAGS.get(key, key): value for key, value in exif.items()}

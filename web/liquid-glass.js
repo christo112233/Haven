@@ -252,6 +252,7 @@
     }
     for(const node of surfaceNodes) {
       if(node===root)continue;
+      if(node.id==='stack-dialog')continue;
       if(node.classList.contains('tree-row')&&!node.classList.contains('active')&&node!==hover&&node!==mergeTarget)continue;
       if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
       const bounds=node.getBoundingClientRect();

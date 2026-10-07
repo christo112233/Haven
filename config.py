@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 
 VERSION = "2.2.0"
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 CACHE_NAME = ".Haven"
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
