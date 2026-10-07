@@ -10,7 +10,7 @@ import config
 import thumbs
 import metadata
 
-METHODS = {"bootstrap", "settings", "window_action", "resize_window", "add_folder", "remove_folder", "folders", "search_folders", "pick_folder", "open_folder", "open_smart_album", "page", "clean_cache", "create_folder", "rename", "move_file", "file_action", "photo_metadata", "update_photo_metadata", "list_tags", "list_smart_albums", "create_smart_album", "update_smart_album", "delete_smart_album", "detect_editors", "open_external", "export_photos", "export_progress", "check_update", "install_update", "update_progress", "release_history"}
+METHODS = {"bootstrap", "settings", "window_action", "resize_window", "add_folder", "remove_folder", "folders", "search_folders", "pick_folder", "open_folder", "open_smart_album", "page", "clean_cache", "create_folder", "rename", "move_file", "file_action", "photo_metadata", "update_photo_metadata", "list_tags", "list_smart_albums", "create_smart_album", "update_smart_album", "delete_smart_album", "detect_editors", "open_external", "export_photos", "export_progress", "count_rejected", "trash_rejected", "check_update", "install_update", "update_progress", "release_history"}
 
 
 def start(api, port=0):

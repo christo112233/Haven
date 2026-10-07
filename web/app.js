@@ -819,6 +819,18 @@ async function renamePath(path,currentName,directory=false){
 }
 function confirmAction(title,description){$('confirm-title').textContent=title;$('confirm-description').textContent=description;$('confirm-dialog').showModal();return new Promise(resolve=>{const finish=value=>{$('confirm-dialog').close();resolve(value);};$('confirm-ok').onclick=()=>finish(true);$('confirm-cancel').onclick=()=>finish(false);$('confirm-dialog').oncancel=()=>resolve(false);});}
 async function trashItem(item){if(await confirmAction('移到回收站',`确认将「${item.name}」移到回收站？`)){await api('file_action',item.path,'trash',true);closeViewer();await openFolder(state.folder);toast('文件已移到回收站');}}
+async function trashRejected(){
+  if(!state.folder){toast('请先打开一个文件夹');return;}
+  const recursive=$('recursive').checked;
+  const {count}=await api('count_rejected',state.folder,recursive);
+  if(!count){toast('没有已拒照片');return;}
+  const scope=recursive?'当前文件夹（含子文件夹）':'当前文件夹';
+  if(!(await confirmAction('移入回收站',`将 ${scope} 中的 ${count} 张已拒照片移入回收站？`)))return;
+  const result=await api('trash_rejected',state.folder,recursive,true);
+  $('metadata-filter').hidden=true;closeSelects();
+  toast(`已移入回收站 ${result.count} 张`);
+  await openFolder(state.folder);
+}
 function transform(){ $('viewer-image').style.transform=`translate(${state.x}px,${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;$('zoom-label').textContent=Math.round(state.scale*100)+'%';window.havenGlass?.refresh(); }
 function fit(){state.scale=1;state.x=0;state.y=0;transform();}
 function setDetailsOpen(open){
@@ -935,7 +947,7 @@ async function init(){
   $('theme-button').onclick=()=>theme((themeTarget||document.documentElement.dataset.theme)==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
   $('search').oninput=event=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=event.target.value;safely(reloadFilter);},200);};
   $('filters').onclick=event=>{const button=event.target.closest('[data-kind]');if(!button)return;state.kind=button.dataset.kind;for(const tab of $('filters').children)tab.setAttribute('aria-selected',tab===button);safely(reloadFilter);};
-  $('metadata-filter-button').onclick=event=>{event.stopPropagation();const panel=$('metadata-filter');panel.hidden=!panel.hidden;if(panel.hidden)closeSelects();else positionMetadataFilter();};$('metadata-filter-close').onclick=()=>{$('metadata-filter').hidden=true;closeSelects();};$('filter-apply').onclick=()=>{state.metadataFilters=readMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};$('filter-clear').onclick=()=>{clearMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};
+  $('metadata-filter-button').onclick=event=>{event.stopPropagation();const panel=$('metadata-filter');panel.hidden=!panel.hidden;if(panel.hidden)closeSelects();else positionMetadataFilter();};$('metadata-filter-close').onclick=()=>{$('metadata-filter').hidden=true;closeSelects();};$('filter-apply').onclick=()=>{state.metadataFilters=readMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};$('filter-clear').onclick=()=>{clearMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};$('trash-rejected').onclick=()=>safely(trashRejected);
   window.addEventListener('resize',positionMetadataFilter);
   $('selection-mode').onclick=toggleSelectionMode;
   $('clear-selection').onclick=()=>{state.selection.clear();state.lastSelectedIndex=null;updateBulkToolbar();scheduleRender();};

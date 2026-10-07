@@ -572,5 +572,30 @@ class CoreTests(unittest.TestCase):
                 api.pool.shutdown(); api.raw_pool.shutdown()
 
 
+    def test_trash_rejected_and_count(self):
+        rejected = self.photo("reject.jpg")
+        keep = self.photo("keep.jpg")
+        sub = self.photo("sub/reject2.jpg")
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.add_folder(str(self.root))
+                api.store.reconcile([{"path": str(rejected)}, {"path": str(keep)}, {"path": str(sub)}])
+                api.store.update([str(rejected), str(sub)], {"rejected": True})
+                self.assertEqual(api.count_rejected(str(self.root))["count"], 1)
+                self.assertEqual(api.count_rejected(str(self.root), True)["count"], 2)
+                with self.assertRaises(ValueError):
+                    api.trash_rejected(str(self.root))
+                with patch("api.send2trash") as trash:
+                    result = api.trash_rejected(str(self.root), confirmed=True)
+                    trash.assert_called_once_with(os.path.normcase(str(rejected)))
+                self.assertEqual(result["count"], 1)
+                self.assertEqual(api.count_rejected(str(self.root), True)["count"], 1)
+                self.assertTrue(keep.is_file())
+                self.assertTrue(sub.is_file())
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

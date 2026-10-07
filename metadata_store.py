@@ -211,6 +211,10 @@ class MetadataStore:
         connection = self._connection()
         return [dict(row) for row in connection.execute("SELECT tags.name, COUNT(photo_tags.photo_id) AS count FROM tags LEFT JOIN photo_tags ON photo_tags.tag_id=tags.id GROUP BY tags.id ORDER BY tags.name COLLATE NOCASE").fetchall()]
 
+    def rejected_paths(self):
+        connection = self._connection()
+        return [row["path"] for row in connection.execute("SELECT path FROM photos WHERE rejected=1").fetchall()]
+
     def move_path(self, old, new):
         connection = self._connection()
         with self._lock, connection:

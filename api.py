@@ -548,6 +548,40 @@ class Api:
             raise ValueError("未知操作")
         return {"ok": True}
 
+    def _rejected_in_folder(self, folder, recursive):
+        folder_norm = os.path.normcase(os.path.abspath(str(folder)))
+        results = []
+        for candidate in self.store.rejected_paths():
+            actual = Path(candidate)
+            if not path_contains(str(folder), str(actual)):
+                continue
+            if not recursive and os.path.normcase(os.path.abspath(str(actual.parent))) != folder_norm:
+                continue
+            results.append(actual)
+        return results
+
+    def count_rejected(self, path, recursive=False):
+        folder = self.authorize(path)
+        if not folder.is_dir():
+            raise ValueError("文件夹不存在")
+        return {"count": len(self._rejected_in_folder(folder, recursive))}
+
+    def trash_rejected(self, path, recursive=False, confirmed=False):
+        if not confirmed:
+            raise ValueError("移入回收站需要确认")
+        folder = self.authorize(path)
+        if not folder.is_dir():
+            raise ValueError("文件夹不存在")
+        count = 0
+        for actual in self._rejected_in_folder(folder, recursive):
+            if not actual.is_file():
+                self.store.remove_path(str(actual))
+                continue
+            send2trash(str(actual))
+            self.store.remove_path(str(actual))
+            count += 1
+        return {"count": count}
+
     def detect_editors(self):
         """Detect installed photo editors (Photoshop / Lightroom) on Windows."""
         editors = [{"id": "default", "name": "系统默认程序", "exe": None, "available": True}]
