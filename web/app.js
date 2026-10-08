@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const icons = root => lucide.createIcons({root: root || document, attrs: {'aria-hidden': 'true'}});
-const state = {job: null, folder: '', lastFolder: '', roots: [], expanded: new Set(), children: new Map(), counts: new Map(), rows: new Map(), pages: new Map(), total: 0, kind: 'all', sort: 'name', descending: false, query: '', size: 240, epoch: 0, viewerIndex: 0, current: null, scale: 1, rotation: 0, x: 0, y: 0, desktop: false, update: null, optimisticMoved: new Set(), silentScan: false, metadataFilters: {}, selection: new Set(), selectionMode: false, lastSelectedIndex: null, smartAlbums: [], smartAlbum: null, subfolders: [], subfoldersExpanded: false, session: null, pickMode: false, exportMode: 'copy', exportFolder: '', externalEditor: null, editors: [], exportJob: null, stack: false, stackMembers: null, stackPos: 0, stackExpand: false};
+const state = {job: null, folder: '', lastFolder: '', roots: [], expanded: new Set(), children: new Map(), counts: new Map(), rows: new Map(), pages: new Map(), total: 0, kind: 'all', sort: 'name', descending: false, query: '', size: 240, epoch: 0, viewerIndex: 0, current: null, scale: 1, rotation: 0, x: 0, y: 0, desktop: false, update: null, optimisticMoved: new Set(), silentScan: false, metadataFilters: {}, selection: new Set(), selectionMode: false, lastSelectedIndex: null, smartAlbums: [], smartAlbum: null, subfolders: [], subfoldersExpanded: false, session: null, pickMode: false, exportMode: 'copy', exportFolder: '', externalEditor: null, editors: [], exportJob: null, stack: false, stackMembers: null, stackPos: 0, stackExpand: false, stackCoverIndex: 0, stackCoverMembers: null};
 const number = new Intl.NumberFormat('zh-CN');
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
@@ -9,9 +9,70 @@ const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' :
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
 let toastTimer, searchTimer, folderSearchTimer, folderSearchRequest = 0, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false, renderForcePending = false, detailsCloseTimer;
-let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true, subfolderRequest = 0, subfolderNavigation = 0, subfolderAnimation = null;
+let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true, subfolderRequest = 0, subfolderNavigation = 0, subfolderAnimation = null, stackRenderScheduled = false, stackResizeObserver = null;
 let moveQueue = Promise.resolve();
 const DRAG_PATH = 'application/x-haven-path', DRAG_PATHS = 'application/x-haven-paths';
+function initScrollbars(){
+  const bars=[],resize=new ResizeObserver(schedule);
+  let pending=false;
+  function schedule(){if(!pending){pending=true;requestAnimationFrame(update);}}
+  function update(){
+    pending=false;
+    let animating=false;
+    for(const {container,rail,thumb} of bars){
+      const max=Math.max(0,container.scrollHeight-container.clientHeight);
+      const visible=max>1&&container.checkVisibility()&&container.clientHeight>0;
+      if(rail.hidden===visible)rail.hidden=!visible;
+      if(!visible)continue;
+      const root=container.closest('dialog')||document.body;
+      if(rail.parentNode!==root)root.append(rail);
+      const bounds=container.getBoundingClientRect(),origin=root===document.body?null:root.getBoundingClientRect();
+      const scaleX=origin?origin.width/root.offsetWidth:1,scaleY=origin?origin.height/root.offsetHeight:1;
+      rail.style.left=`${(bounds.right-(origin?.left||0))/scaleX-(root===document.body?0:root.clientLeft)-10}px`;
+      rail.style.top=`${(bounds.top-(origin?.top||0))/scaleY+container.clientTop-(root===document.body?0:root.clientTop)}px`;
+      rail.style.height=`${container.clientHeight}px`;
+      const height=Math.min(container.clientHeight,Math.max(32,container.clientHeight**2/container.scrollHeight));
+      thumb.style.height=`${height}px`;
+      thumb.style.transform=`translateY(${(container.clientHeight-height)*container.scrollTop/max}px)`;
+      rail.setAttribute('aria-valuemax',String(max));rail.setAttribute('aria-valuenow',String(Math.round(container.scrollTop)));
+      if(origin&&root.getAnimations().some(animation=>animation.playState==='running'))animating=true;
+    }
+    if(animating)schedule();
+  }
+  for(const id of ['viewport','tree','folder-search-results','stack-list','details']){
+    const container=$(id);if(!container)continue;
+    container.classList.add('custom-scroll');
+    const rail=document.createElement('div'),thumb=document.createElement('span');
+    rail.className='custom-scrollbar';rail.hidden=true;rail.tabIndex=0;
+    rail.setAttribute('role','scrollbar');rail.setAttribute('aria-controls',id);rail.setAttribute('aria-orientation','vertical');rail.setAttribute('aria-valuemin','0');rail.setAttribute('aria-label','滚动');
+    thumb.className='custom-scrollbar-thumb';rail.append(thumb);
+    (container.closest('dialog')||document.body).append(rail);
+    let drag=null;
+    rail.onpointerdown=event=>{
+      if(event.button!==0)return;
+      event.preventDefault();event.stopPropagation();
+      if(event.target!==thumb){container.scrollTop+=(event.clientY<thumb.getBoundingClientRect().top?-1:1)*container.clientHeight;schedule();return;}
+      drag={pointer:event.pointerId,y:event.clientY,scroll:container.scrollTop,max:container.scrollHeight-container.clientHeight,travel:rail.getBoundingClientRect().height-thumb.getBoundingClientRect().height};
+      rail.setPointerCapture(event.pointerId);rail.classList.add('is-dragging');
+    };
+    rail.onpointermove=event=>{if(drag&&event.pointerId===drag.pointer){container.scrollTop=drag.scroll+(event.clientY-drag.y)*drag.max/Math.max(1,drag.travel);schedule();}};
+    rail.onpointerup=rail.onpointercancel=()=>{drag=null;rail.classList.remove('is-dragging');};
+    rail.onclick=event=>event.stopPropagation();
+    rail.onkeydown=event=>{
+      const steps={ArrowUp:-40,ArrowDown:40,PageUp:-container.clientHeight,PageDown:container.clientHeight};
+      if(event.key in steps)container.scrollTop+=steps[event.key];
+      else if(event.key==='Home')container.scrollTop=0;
+      else if(event.key==='End')container.scrollTop=container.scrollHeight;
+      else return;
+      event.preventDefault();event.stopPropagation();schedule();
+    };
+    rail.addEventListener('wheel',event=>{event.preventDefault();container.scrollTop+=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?container.clientHeight:1);schedule();},{passive:false});
+    container.addEventListener('scroll',schedule,{passive:true});
+    resize.observe(container);bars.push({container,rail,thumb});
+  }
+  new MutationObserver(schedule).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','open']});
+  window.addEventListener('resize',schedule);schedule();
+}
 function initSidebarResize() {
   const root=document.documentElement,handle=$('sidebar-resize'),storageKey='haven.sidebar-width';
   let preferred=Number(localStorage.getItem(storageKey))||null,drag=null;
@@ -580,7 +641,16 @@ function updateBulkToolbar(){const bar=$('bulk-toolbar');if(!bar)return;bar.hidd
 function toggleSelectionMode(){state.selectionMode=!state.selectionMode;if(!state.selectionMode){state.selection.clear();state.lastSelectedIndex=null;}updateBulkToolbar();scheduleRender();}
 async function applyMetadata(paths,patch){const result=await api('update_photo_metadata',paths,patch);const mergeMeta=list=>{if(!list)return;for(const item of list){const key=Object.keys(result.metadata).find(candidate=>normalizeClientPath(candidate)===normalizeClientPath(item.path));const value=key&&result.metadata[key];if(value)Object.assign(item,value);}};for(const items of state.pages.values())mergeMeta(items);mergeMeta(state.stackCoverMembers);mergeMeta(state.stackMembers);if(state.current){const currentKey=Object.keys(result.metadata).find(candidate=>normalizeClientPath(candidate)===normalizeClientPath(state.current.path));if(currentKey)Object.assign(state.current,result.metadata[currentKey]);syncViewerMetadata();}const knownTags=await api('list_tags');$('tag-suggestions').replaceChildren(...knownTags.map(tag=>{const option=document.createElement('option');option.value=tag.name;return option;}));toast(`已更新 ${result.count} 项`);updateBulkToolbar();if(state.smartAlbum){const albumJob=await api('open_smart_album',state.smartAlbum);state.epoch++;state.job=albumJob.job;state.pages.clear();state.total=0;await poll(state.epoch);}else if(Object.keys(state.metadataFilters).length)await reloadFilter();else scheduleRender();}
 function normalizeClientPath(path){return String(path||'').replace(/[\\/]+/g,'/').toLowerCase();}
-function itemsForPaths(paths){const wanted=new Set(paths.map(normalizeClientPath)),items=[];for(const page of state.pages.values())for(const item of page)if(wanted.has(normalizeClientPath(item.path)))items.push(item);return items;}
+function itemsForPaths(paths){
+  const wanted=new Set(paths.map(normalizeClientPath)),items=new Map();
+  const lists=[[state.current],state.stackMembers,state.stackCoverMembers,...state.pages.values()];
+  for(const list of lists)for(const item of list||[]){
+    if(!item)continue;
+    const path=normalizeClientPath(item.path);
+    if(wanted.has(path)&&!items.has(path))items.set(path,item);
+  }
+  return [...items.values()];
+}
 async function toggleMetadata(paths,key){const items=itemsForPaths(paths),value=items.length>0&&items.every(item=>Boolean(item[key]));await applyMetadata(paths,{[key]:!value});}
 function syncViewerMetadata(){const item=state.current;if(!item)return;for(const key of ['favorite','flagged','rejected']){const button=$(`viewer-${key}`);if(!button)continue;button.classList.toggle('is-active',Boolean(item[key]));button.setAttribute('aria-pressed',String(Boolean(item[key])));button.title=item[key]?`取消${key==='favorite'?'收藏':key==='flagged'?'旗帜':'Rejected'}`:key==='favorite'?'收藏':key==='flagged'?'旗帜':'标记 Rejected';}const tagButton=$('viewer-tag');if(tagButton){tagButton.classList.toggle('is-active',Boolean(item.tags?.length));tagButton.title=item.tags?.length?'管理标签':'添加标签';}const colorButton=$('viewer-color');if(colorButton){colorButton.classList.toggle('is-active',Boolean(item.color_label));colorButton.style.color=item.color_label||'';colorButton.title=item.color_label?`颜色标签：${item.color_label}`:'设置颜色标签';}const rating=$('viewer-rating-value');if(rating){rating.textContent=item.rating?`★ ${item.rating}/5`:'未评分';rating.setAttribute('aria-label',item.rating?`当前评分 ${item.rating} 星`:'当前未评分');}renderViewerDetails(item);}
 function renderViewerDetails(item){
@@ -808,9 +878,8 @@ function contextMenu(event,actions){
   menu.style.left=Math.max(gap,Math.min(event.clientX,innerWidth-bounds.width-gap))+'px';
   menu.style.top=Math.max(gap,Math.min(event.clientY,innerHeight-bounds.height-gap))+'px';
 }
-function cardActions(item,fromStack=false){
-  const closeStack=fromStack?()=>collectStackDialog():()=>Promise.resolve();
-  return [['star','设置评分',()=>promptRating([item.path])],['heart',item.favorite?'取消收藏':'收藏',()=>toggleMetadata([item.path],'favorite')],['flag',item.flagged?'取消旗帜':'旗帜',()=>toggleMetadata([item.path],'flagged')],['circle-x',item.rejected?'取消 Rejected':'标记 Rejected',()=>toggleMetadata([item.path],'rejected')],['tag','管理标签',()=>promptTags([item.path])],['palette','颜色标签',()=>promptColor([item.path])],['pencil','重命名',async()=>{await closeStack();await renamePath(item.path,item.name,false);}],['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['check-check',isPicked(item.path)?'移出本轮':'选入本轮',()=>{if(!state.session)openSessionDialog('start');else safely(()=>toggleRoundPick(item.path));}],['external-link','在外部编辑器中打开',()=>openExportDialog([item.path],'open')],['folder-output','导出到文件夹…',()=>openExportDialog([item.path],'export')],['trash-2','移到回收站',async()=>{await closeStack();await trashItem(item);}]];
+function cardActions(item){
+  return [['star','设置评分',()=>promptRating([item.path])],['heart',item.favorite?'取消收藏':'收藏',()=>toggleMetadata([item.path],'favorite')],['flag',item.flagged?'取消旗帜':'旗帜',()=>toggleMetadata([item.path],'flagged')],['circle-x',item.rejected?'取消 Rejected':'标记 Rejected',()=>toggleMetadata([item.path],'rejected')],['tag','管理标签',()=>promptTags([item.path])],['palette','颜色标签',()=>promptColor([item.path])],['pencil','重命名',()=>renamePath(item.path,item.name,false)],['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['check-check',isPicked(item.path)?'移出本轮':'选入本轮',()=>{if(!state.session)openSessionDialog('start');else safely(()=>toggleRoundPick(item.path));}],['external-link','在外部编辑器中打开',()=>openExportDialog([item.path],'open')],['folder-output','导出到文件夹…',()=>openExportDialog([item.path],'export')],['trash-2','移到回收站',()=>trashItem(item)]];
 }
 function requestRename(currentName,directory=false,heading=''){
   const dialog=$('rename-dialog'),input=$('rename-name'),form=$('rename-form');
@@ -920,22 +989,101 @@ async function openStackExpand(coverItem, coverIndex){
   let members=[];
   try{members=await api('stack_items',state.job,coverItem.stack_id);}catch(error){}
   if(!members.length){showViewer(coverIndex);return;}
-  state.stackCoverIndex=coverIndex;state.stackCoverMembers=members;state.stackExpand=true;
-  renderStackList(members);$('stack-dialog').showModal();
+  state.stackCoverIndex=coverIndex;state.stackCoverMembers=members;state.stackExpand=true;state.stackScrollTop=0;
+  const list=$('stack-list');list.scrollTop=0;
+  $('stack-dialog').showModal();
+  renderStackList(members);
 }
-function renderStackList(members){
-  const list=$('stack-list');list.replaceChildren();
+// The stack panel can hold hundreds of photos: measure the grid, then render only the
+// cards around the visible area so photos in view appear immediately (no long deal delay).
+// The list must be pinned to a pixel height first, otherwise it grows with its content and
+// never scrolls; the inner .stack-cards spacer carries the full scroll height.
+function stackViewport(){
+  const list=$('stack-list');
+  list.style.height='';
+  const height=list.clientHeight;
+  list.style.height=`${height}px`;
+  return height;
+}
+function stackLayout(list,count,viewportHeight){
+  const style=getComputedStyle(list),gap=parseFloat(style.columnGap)||14;
+  const paddingLeft=parseFloat(style.paddingLeft)||0,paddingTop=parseFloat(style.paddingTop)||0;
+  const width=list.clientWidth-paddingLeft-(parseFloat(style.paddingRight)||0);
+  const columns=Math.max(1,Math.floor((width+gap)/(150+gap)));
+  const tile=Math.max(96,(width-(columns-1)*gap)/columns),rowHeight=Math.round(tile+39);
+  const top=list.scrollTop,height=viewportHeight||list.clientHeight||140;
+  const firstRow=Math.max(0,Math.floor((top-paddingTop)/rowHeight)-2);
+  const lastRow=Math.ceil((top+height-paddingTop)/rowHeight)+2;
+  const start=Math.min(count,firstRow*columns),end=Math.min(count,lastRow*columns);
+  return {gap,paddingLeft,paddingTop,columns,tile,rowHeight,start,end,count,viewportHeight:height,
+    contentHeight:Math.ceil(count/columns)*rowHeight};
+}
+function renderStackList(members,scrollTop=0){
+  const list=$('stack-list');
+  const host=document.createElement('div');host.className='stack-cards';
+  list.replaceChildren(host);
+  state.stackRenderList=members;state.stackRenderLayout=null;
   $('stack-dialog-title').textContent=`堆栈 · ${members.length} 张`;
-  members.forEach((member,pos)=>{
-    const card=document.createElement('button');
-    card.type='button';card.className='stack-card';card.style.setProperty('--i',pos);
-    card.innerHTML=`<div class="stack-card-picture"><img alt="" loading="lazy"></div><span class="stack-card-name">${escapeHTML(member.name)}</span>`;
-    card.querySelector('img').src=mediaURL(member,'thumb');
-    card.onclick=()=>collectStackDialog(()=>showStackMember(state.stackCoverIndex,members,pos));
-    card.oncontextmenu=event=>{event.preventDefault();contextMenu(event,cardActions(member,true));};
-    list.append(card);
+  const viewportHeight=stackViewport();
+  let layout=stackLayout(list,members.length,viewportHeight);
+  host.style.height=`${layout.contentHeight+layout.paddingTop+14}px`;
+  list.scrollTop=scrollTop;
+  layout=stackLayout(list,members.length,viewportHeight);
+  layout.scroll=list.scrollTop;
+  layout.members=members;
+  layout.cards=new Map();
+  state.stackRenderLayout=layout;
+  renderStackWindow(layout);
+}
+function stackCard(member,index,layout){
+  const card=document.createElement('button');
+  card.type='button';card.className='stack-card';
+  card.style.width=`${layout.tile}px`;
+  card.style.left=`${layout.paddingLeft+(index%layout.columns)*(layout.tile+layout.gap)}px`;
+  card.style.top=`${layout.paddingTop+Math.floor(index/layout.columns)*layout.rowHeight}px`;
+  card.innerHTML=`<div class="stack-card-picture"><img alt="" loading="lazy"></div><span class="stack-card-name">${escapeHTML(member.name)}</span>`;
+  card.querySelector('img').src=mediaURL(member,'thumb');
+  card.onclick=()=>collectStackDialog(()=>showStackMember(state.stackCoverIndex,layout.members,index));
+  // The stack panel keeps its click-only interaction: no right-click menu, no native context menu.
+  card.oncontextmenu=event=>event.preventDefault();
+  return card;
+}
+// Keep mounted cards mounted when scrolling through the buffered window.
+function renderStackWindow(layout){
+  const host=$('stack-list').querySelector('.stack-cards');
+  if(!host||!layout.members)return;
+  const cards=layout.cards||(layout.cards=new Map());
+  for(const [index,node] of cards){
+    if(index<layout.start||index>=layout.end||layout.members[index]!==node.__stackMember){
+      node.remove();cards.delete(index);
+    }
+  }
+  for(let index=layout.start;index<layout.end;index++){
+    if(cards.has(index))continue;
+    const member=layout.members[index];if(!member)continue;
+    const node=stackCard(member,index,layout);
+    node.__stackMember=member;
+    cards.set(index,node);
+    host.append(node);
+  }
+}
+// Re-render only when the scroll position leaves the buffered window.
+function stackScheduleRender(){
+  const list=$('stack-list'),layout=state.stackRenderLayout,dialog=$('stack-dialog');
+  if(!layout||!dialog.open||dialog.classList.contains('is-collecting'))return;
+  if(Math.abs(list.scrollTop-(layout.scroll||0))<2||stackRenderScheduled)return;
+  stackRenderScheduled=true;
+  requestAnimationFrame(()=>{
+    stackRenderScheduled=false;
+    const current=state.stackRenderLayout,dialog=$('stack-dialog');
+    if(!current||!dialog.open||dialog.classList.contains('is-collecting'))return;
+    const list=$('stack-list'),scroll=list.scrollTop;
+    const next=stackLayout(list,current.members?.length||0,current.viewportHeight);
+    const covered=current.start<=next.start&&current.end>=next.end;
+    next.members=current.members;next.scroll=scroll;next.cards=current.cards;
+    state.stackRenderLayout=next;
+    if(!covered)renderStackWindow(next);
   });
-  icons(list);
 }
 function showStackMember(coverIndex,members,pos){
   state.viewerIndex=coverIndex;state.stackMembers=members;state.stackPos=pos;
@@ -953,17 +1101,29 @@ function collectStackDialog(then){
     if(then)then();
   };
   if(!dialog.open){finish();return Promise.resolve();}
+  if(then)state.stackScrollTop=$('stack-list').scrollTop;
   stackClosePromise=new Promise(resolve=>{
+    let closeTimer=null,last=null,onCollected=null;
     // close() also fades the dialog; keep cards collected until it leaves the top layer.
-    dialog.addEventListener('close',()=>{finish();resolve();},{once:true});
-    const count=dialog.querySelectorAll('.stack-card').length||1;
-    const duration=matchMedia('(prefers-reduced-motion: reduce)').matches?0:Math.min(520,count*18+260);
+    dialog.addEventListener('close',()=>{clearTimeout(closeTimer);if(last&&onCollected)last.removeEventListener('animationend',onCollected);finish();resolve();},{once:true});
+    // Only the cards currently rendered are animated, so the collect stagger stays short.
+    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const cards=[...dialog.querySelectorAll('.stack-card')];
+    let delay=0;
+    cards.forEach((card,index)=>{delay=Math.min(260,index*18);card.style.setProperty('--stack-collect-delay',`${reduced?0:delay}ms`);});
+    const duration=reduced?0:260+delay;
     dialog.classList.add('is-collecting');
-    setTimeout(()=>dialog.close(),duration);
+    closeTimer=setTimeout(()=>dialog.close(),duration);
+    if(!reduced){
+      // A busy or slow renderer can start the animations late; close as soon as they are done.
+      last=cards[cards.length-1];
+      onCollected=()=>{clearTimeout(closeTimer);closeTimer=setTimeout(()=>dialog.close(),0);};
+      if(last)last.addEventListener('animationend',onCollected,{once:true});
+    }
   });
   return stackClosePromise;
 }
-function closeViewer(reopenStack=true){setDetailsOpen(false);$('viewer-video').pause();$('viewer').close();if(reopenStack&&state.stackExpand&&state.stackCoverMembers?.length){renderStackList(state.stackCoverMembers);$('stack-dialog').showModal();}scheduleRender();}
+function closeViewer(reopenStack=true){setDetailsOpen(false);$('viewer-video').pause();$('viewer').close();if(reopenStack&&state.stackExpand&&state.stackCoverMembers?.length){$('stack-dialog').showModal();renderStackList(state.stackCoverMembers,state.stackScrollTop||0);}scheduleRender();}
 function showUpdate(result){if(!result.available)return;state.update=result.manifest;const data=state.update;$('update-version').textContent=`新版本 ${data.version}`;$('update-notes').textContent=data.notes||'新版本已发布';$('update-size').textContent=bytes(data.size);$('skip-update').hidden=!!data.mandatory;$('later-update').hidden=!!data.mandatory;$('download-progress').hidden=true;$('download-status').textContent='';$('install-update').disabled=false;if(!$('update-dialog').open)$('update-dialog').showModal();}
 async function installUpdate(){await api('install_update',true);$('install-update').disabled=true;$('skip-update').disabled=true;$('later-update').disabled=true;$('download-progress').hidden=false;const poll=async()=>{const progress=await api('update_progress');$('download-progress').value=progress.progress||0;$('download-status').textContent=progress.state==='error'?progress.error:progress.state==='restarting'?'正在重启…':`正在下载 ${progress.progress||0}%`;if(progress.state==='downloading')setTimeout(()=>safely(poll),500);else if(progress.state==='error'){$('install-update').disabled=false;$('skip-update').disabled=false;$('later-update').disabled=false;}};await poll();}
 function conditionRows(){return [...document.querySelectorAll('#smart-album-conditions .smart-condition')].map(row=>{const input=row.querySelector('input[data-value]'),color=row.querySelector('select[data-color-value]'),boolean=row.querySelector('input[data-boolean-value]');return {field:row.querySelector('select[data-field]').value,operator:row.querySelector('select[data-operator]').value,value:!boolean.parentElement.hidden?boolean.checked? 'true':'false':color&&!color.hidden?color.value:input?.value.trim()||''};}).filter(row=>row.value!==''||row.operator==='is_empty');}
@@ -1010,6 +1170,7 @@ function editSmartAlbum(album){openSmartAlbumEditor(album);}
 function bindSmartAlbumForm(){const form=$('smart-album-form');form.onsubmit=event=>safely(async()=>{event.preventDefault();const name=$('smart-album-name').value.trim();const conditions=conditionRows().map(row=>({field:row.field,operator:row.operator,value:row.operator==='is_empty'?'unrated':['favorite','flagged','rejected'].includes(row.field)?row.value.toLowerCase()==='true':row.field==='rating'?Number(row.value):row.value}));if(!name||!conditions.length)throw new Error('请填写相册名称并至少添加一个条件');const definition={logic:$('smart-album-logic').value,conditions};if(editingSmartAlbumId)await api('update_smart_album',editingSmartAlbumId,name,definition);else await api('create_smart_album',name,definition);dialogClose('smart-album-dialog');await renderSmartAlbums();});$('add-smart-condition').onclick=()=>{$('smart-album-conditions').append(buildConditionRow());};}
 function dialogClose(id){const dialog=$(id);if(dialog?.open)dialog.close();}
 async function init(){
+  initScrollbars();
   initSidebarResize();
   glassSelect('filter-rating-op');glassSelect('filter-rating');glassSelect('filter-color');glassSelect('smart-album-logic');glassSelect('export-mode');glassSelect('export-action');glassSelect('export-editor');glassSelect('export-collision');glassSelect('export-mode-setting');
   icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;state.exportMode=boot.state.export_mode||'copy';state.exportFolder=boot.state.export_folder||'';state.externalEditor=boot.state.external_editor||null;state.session=boot.state.session||null;state.stack=Boolean(boot.state.stack);document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;syncSelect('theme-select');$('export-mode-setting').value=state.exportMode;syncSelect('export-mode-setting');$('thumb-size').value=state.size;$('stack-toggle').checked=state.stack;$('stack-base-gap').value=boot.state.stack_base_gap??2;$('stack-factor').value=boot.state.stack_factor??1.5;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;ensureTransparencyControl(Number.isFinite(Number(boot.state.glass_transparency))?Number(boot.state.glass_transparency):.24);
@@ -1080,6 +1241,20 @@ async function init(){
   $('thumb-size').oninput=event=>{state.size=Number(event.target.value);document.documentElement.style.setProperty('--tile',state.size+'px');scheduleRender();};$('thumb-size').onchange=()=>safely(()=>api('settings',{thumb_size:state.size}));
   $('recursive').onchange=()=>{if(state.folder)safely(()=>openFolder(state.folder));};$('stack-toggle').onchange=event=>{state.stack=event.target.checked;if(state.stack){state.sort='date';state.descending=false;$('sort').value='date';syncSelect('sort');}safely(async()=>{await api('settings',{stack:state.stack});await reloadFilter();});};$('stack-base-gap').onchange=event=>safely(()=>api('settings',{stack_base_gap:Number(event.target.value)}));$('stack-factor').onchange=event=>safely(()=>api('settings',{stack_factor:Number(event.target.value)}));$('viewport').onscroll=()=>scheduleRender(false);new ResizeObserver(()=>scheduleRender()).observe($('viewport'));
   $('viewer-close').onclick=closeViewer;$('viewer').oncancel=event=>{event.preventDefault();closeViewer();};$('stack-dialog-close').onclick=()=>collectStackDialog();$('stack-dialog').oncancel=event=>{event.preventDefault();collectStackDialog();};
+  // The stack panel only renders the cards near its scroll position.
+  $('stack-list').addEventListener('scroll',()=>stackScheduleRender(),{passive:true});
+  stackResizeObserver=new ResizeObserver(()=>{
+    const dialog=$('stack-dialog'),current=state.stackRenderLayout;
+    if(!dialog.open||dialog.classList.contains('is-collecting')||!current)return;
+    const next=stackLayout($('stack-list'),current.members?.length||0,current.viewportHeight);
+    const changed=next.columns!==current.columns||next.tile!==current.tile||next.start<current.start||next.end>current.end;
+    next.members=current.members;next.scroll=$('stack-list').scrollTop;next.cards=current.cards;
+    const host=$('stack-list').querySelector('.stack-cards');
+    if(host)host.style.height=`${next.contentHeight+next.paddingTop+14}px`;
+    state.stackRenderLayout=next;
+    if(changed)renderStackWindow(next);
+  });
+  stackResizeObserver.observe($('stack-list'));
   $('viewer').addEventListener('close',()=>{const video=$('viewer-video');video.removeAttribute('src');video.load();$('viewer-image').removeAttribute('src');setDetailsOpen(false);});
   $('previous').onclick=()=>safely(()=>navigateViewer(-1));$('next').onclick=()=>safely(()=>navigateViewer(1));$('rotate').onclick=()=>{state.rotation+=90;transform();};$('fit').onclick=fit;
   $('actual').onclick=()=>{const img=$('viewer-image');state.scale=img.naturalWidth/Math.max(1,img.clientWidth);state.x=state.y=0;transform();};

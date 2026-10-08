@@ -9,11 +9,12 @@
   let program, canvas, ctx, scene, blurredScene, blurCtx, lastTheme, themeFade;
   let pointer = {x: -200, y: -200}, cursorTarget = {x: -200, y: -200}, cursorVisible = false, hover = null, pressed = null;
   let cursorElement = null;
-  let frame = 0, lastTick = 0, lastPaint = 0, sceneDirty = true, running = true;
+  let frame = 0, lastTick = 0, lastPaint = 0, lastVideoCapture = 0, sceneDirty = true, running = true;
   let activePill = null, sliderThumb = null;
   let sceneRevision = 0, lastInteraction = 0;
-  let surfaceNodes = [], modalCanvas = null, activeDialog = null;
-  const diagnostics = {ready:false, frames:0, surfaces:0, backend:'fallback', animations:0};
+  let surfaceNodes = [], modalCanvas = null, cursorCanvas = null, activeDialog = null;
+  let cursorPaintedPoint = '', cursorLayerDirty = true, backgroundRevision = -1;
+  const diagnostics = {ready:false, frames:0, surfaces:0, backend:'fallback', animations:0, cursorPaints:0};
   window.havenGlass = {diagnostics, refresh: () => {sceneDirty = true;}, setTransparency: value => {document.documentElement.style.setProperty('--glass-transparency', String(Math.max(0, Math.min(1, Number(value) || 0))));sceneDirty = true;}, setThemeInstant: () => {themeFade=null;sceneDirty=true;if(diagnostics.ready)animate(performance.now(),true);}, renderOnce: () => {if(diagnostics.ready)animate(performance.now(),true);}};
 
   async function shaderSource(path) {
@@ -180,7 +181,7 @@
   function updateCursor() {
     pointer.x = cursorTarget.x; pointer.y = cursorTarget.y;
     if (cursorElement) {
-      const dialogBounds=activeDialog?.getBoundingClientRect();
+      const dialogBounds=cursorElement.matches(':popover-open')?null:activeDialog?.getBoundingClientRect();
       cursorElement.style.left = `${cursorTarget.x-(dialogBounds?.left||0)}px`;
       cursorElement.style.top = `${cursorTarget.y-(dialogBounds?.top||0)}px`;
       cursorElement.classList.toggle('is-visible', cursorVisible);
@@ -202,12 +203,22 @@
 
   function syncCursorLayer(dialog) {
     if (!cursorElement) return;
-    if (dialog) {
-      if (cursorElement.parentNode !== dialog) dialog.append(cursorElement);
-    } else if (cursorElement.parentNode !== document.body) {
-      document.body.append(cursorElement);
+    const menuOpen=document.getElementById('context-menu').matches(':popover-open');
+    const host=menuOpen?document.body:dialog||document.body;
+    if(cursorElement.parentNode!==host){
+      if(cursorElement.matches(':popover-open'))cursorElement.hidePopover();
+      host.append(cursorElement);
     }
-    cursorElement.classList.toggle('is-modal', Boolean(dialog));
+    // A popover menu is above normal document layers, including a high-z-index cursor.
+    if(menuOpen){
+      cursorElement.setAttribute('popover','manual');
+      if(!cursorElement.matches(':popover-open'))cursorElement.showPopover();
+    }else if(cursorElement.hasAttribute('popover')){
+      if(cursorElement.matches(':popover-open'))cursorElement.hidePopover();
+      cursorElement.removeAttribute('popover');
+    }
+    cursorElement.classList.toggle('is-modal', Boolean(dialog)&&!menuOpen);
+    cursorLayerDirty=true;cursorPaintedPoint='';
   }
 
   function visibleWithinScrollers(node, bounds) {
@@ -224,43 +235,51 @@
     return true;
   }
 
-  function rectangles(root, dt) {
-    const rects=[];
-    let mergedCursor=false;
-    let mergeTarget=null, mergeDistance=32;
-    if(cursorVisible && (root ? activeDialog===root : !activeDialog)) {
-      const candidates=surfaceNodes.filter(node=>node.tagName==='BUTTON'||node.classList.contains('tree-row'));
-      if(!root)candidates.push(...document.querySelectorAll('#filters button'));
-      for(const node of candidates) {
-        // Opaque floating panels cover the shared WebGL canvas, so their cursor stays in the DOM layer.
-        if(node.closest('#metadata-filter, #bulk-toolbar'))continue;
-        if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
-        const bounds=node.getBoundingClientRect();
-        if(!visibleWithinScrollers(node,bounds))continue;
-        const distance=distanceToBounds(bounds);
-        if(distance<mergeDistance){mergeTarget=node;mergeDistance=distance;}
-      }
-      if(!root){
-        const input=document.getElementById('thumb-size');
-        if(input){
-          const bounds=input.getBoundingClientRect(),fraction=(Number(input.value)-Number(input.min))/(Number(input.max)-Number(input.min));
-          const x=bounds.x+12+fraction*(bounds.width-24),y=bounds.y+bounds.height/2;
-          const distance=distanceToBounds({left:x-12,right:x+12,top:y-10,bottom:y+10});
-          if(distance<mergeDistance)mergeTarget=input;
-        }
+  // The surface under the pointer that the cursor glass merges into (buttons, tree rows, sliders).
+  function findMergeTarget(root) {
+    if (!cursorVisible || (root ? activeDialog !== root : Boolean(activeDialog))) return null;
+    let target = null, best = 32;
+    const candidates = surfaceNodes.filter(node => node.tagName === 'BUTTON' || node.classList.contains('tree-row'));
+    if (!root) candidates.push(...document.querySelectorAll('#filters button'));
+    for (const node of candidates) {
+      // Opaque floating panels cover the shared WebGL canvas, so their cursor stays in the DOM layer.
+      if (node.closest('#metadata-filter, #bulk-toolbar')) continue;
+      if (!node.isConnected || node.closest('dialog') !== root || !node.checkVisibility()) continue;
+      const bounds = node.getBoundingClientRect();
+      if (!visibleWithinScrollers(node, bounds)) continue;
+      const distance = distanceToBounds(bounds);
+      if (distance < best) { target = node; best = distance; }
+    }
+    if (!root) {
+      const input = document.getElementById('thumb-size');
+      if (input) {
+        const bounds = input.getBoundingClientRect();
+        const fraction = (Number(input.value) - Number(input.min)) / (Number(input.max) - Number(input.min));
+        const x = bounds.x + 12 + fraction * (bounds.width - 24), y = bounds.y + bounds.height / 2;
+        if (distanceToBounds({left:x-12,right:x+12,top:y-10,bottom:y+10}) < best) target = input;
       }
     }
+    return target;
+  }
+
+  function rectangles(root, dt, cursorsOnly=false, mergeTarget=findMergeTarget(root)) {
+    const rects=[];
+    let mergedCursor=false;
     for(const node of surfaceNodes) {
       if(node===root)continue;
+      if(cursorsOnly&&node!==mergeTarget)continue;
+      if(root&&!cursorsOnly&&node===mergeTarget)continue;
       if(node.id==='stack-dialog')continue;
       if(node.classList.contains('tree-row')&&!node.classList.contains('active')&&node!==hover&&node!==mergeTarget)continue;
-      if(!node.isConnected||!node.checkVisibility()||node.closest('dialog')!==root)continue;
+      if(!node.isConnected||node.closest('dialog')!==root||!node.checkVisibility())continue;
       const bounds=node.getBoundingClientRect();
       if(bounds.width<2||bounds.height<2||bounds.bottom<0||bounds.top>innerHeight)continue;
       if(!visibleWithinScrollers(node,bounds))continue;
       const style=getComputedStyle(node);
       const radius=Math.min(parseFloat(style.borderTopLeftRadius)||8,bounds.width/2,bounds.height/2);
       const value=spring(node,{x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2,w:bounds.width,h:bounds.height},dt);
+      // CSS already interpolates button transforms; glass must follow the same bounds.
+      if(node.tagName==='BUTTON')Object.assign(value,{x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2,w:bounds.width,h:bounds.height});
       const dialog=node.classList.contains('panel-dialog');
       const details=node.id==='details';
       const panel=node.id==='sidebar'||dialog||details;
@@ -268,6 +287,11 @@
       const trail = node===mergeTarget ? cursorTrail({left:bounds.left, right:bounds.right, top:bounds.top, bottom:bounds.bottom}) : [0,0,0,0];
       if (trail[2]) mergedCursor=true;
       rects.push({...value,radius,panel,dialog,details,tinted,trail,modalSurface:!!root,blur:dialog||details?1:panel?.3:.2});
+    }
+    if(!cursorsOnly && root) {
+      // The panel canvas stays under the dialog content; the pointer layer draws the cursor and
+      // the single surface it merges into, so the merge keeps the original look above the content.
+      return rects;
     }
     if(!root) {
       const selected=document.querySelector('#filters [aria-selected="true"]');
@@ -299,13 +323,16 @@
         rects.push({...value,radius:12,activity:isPressed?1:.25,tinted:true,trail});
       }
     }
-    if(!root){
-      const menu=document.getElementById('context-menu');
-      const menuBounds=!menu.hidden&&menu.getBoundingClientRect();
-      const overMenu=menuBounds&&cursorTarget.x>=menuBounds.left-12&&cursorTarget.x<=menuBounds.right+12&&cursorTarget.y>=menuBounds.top-12&&cursorTarget.y<=menuBounds.bottom+12;
-      const domLayer=hover?.closest?.('#metadata-filter, #bulk-toolbar')||overMenu;
-      cursorElement?.classList.toggle('is-gpu-free',cursorVisible&&!activeDialog&&(!mergedCursor||domLayer));
+    // Opaque floating panels and the context menu keep the pointer in the DOM layer.
+    const menu=document.getElementById('context-menu');
+    const menuBounds=!menu.hidden&&menu.getBoundingClientRect();
+    const overMenu=menuBounds&&cursorTarget.x>=menuBounds.left-12&&cursorTarget.x<=menuBounds.right+12&&cursorTarget.y>=menuBounds.top-12&&cursorTarget.y<=menuBounds.bottom+12;
+    const domLayer=Boolean(hover?.closest?.('#metadata-filter, #bulk-toolbar')||overMenu);
+    // Only the layer responsible for the cursor updates its DOM fallback visibility.
+    if(root?cursorsOnly:!activeDialog){
+      cursorElement?.classList.toggle('is-gpu-free',cursorVisible&&(!diagnostics.ready||overMenu||(!root&&(!mergedCursor||domLayer))));
     }
+    // A merged cursor is absorbed by the surface it touches, so it is not drawn as its own disc.
     const drawCursor = cursorVisible && root && activeDialog===root && !mergedCursor;
     if (drawCursor) {
       rects.push({x:cursorTarget.x,y:cursorTarget.y,w:24,h:24,radius:12,cursor:true,tinted:true,modalSurface:!!root,activity:pressed ? .7 : .2,blur:0});
@@ -313,7 +340,7 @@
     return rects;
   }
 
-  function paint(renderer, rects, time) {
+  function paint(renderer, rects, time, cursorsOnly=false) {
     const {gl,uniforms,target}=renderer;
     const scale=Math.min(devicePixelRatio,1.5);
     const width=Math.round(innerWidth*scale),height=Math.round(innerHeight*scale);
@@ -327,13 +354,13 @@
     gl.uniform2f(uniforms.u_resolution,width,height);gl.uniform1f(uniforms.u_scale,scale);
     gl.uniform2f(uniforms.u_pointer,pointer.x,pointer.y);gl.uniform1f(uniforms.u_time,reducedMotion.matches?0:time/1000);
     const lightAmount=themeFade ? themeFade.fromLight+(themeFade.toLight-themeFade.fromLight)*themeFade.progress : Number(document.documentElement.dataset.theme==='light');
+    const transparency=Math.max(0,Math.min(1,parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--glass-transparency'))||0));
     for(const rect of rects){
       gl.uniform4f(uniforms.u_rect,rect.x,rect.y,rect.w,rect.h);gl.uniform1f(uniforms.u_radius,rect.radius);
       const trail=rect.trail||[0,0,0,0];gl.uniform4fv(uniforms.u_trail,trail);
       const darkTint=rect.cursor?[.7,.9,1,.08]:rect.dialog?[.03,.08,.14,.35]:rect.details?[.03,.1,.14,.58]:rect.panel?[.02,.065,.12,.52]:rect.tinted?[.5,.82,.94,.18]:[.025,.075,.13,.22];
       const lightTint=rect.cursor?[.65,.84,1,.07]:rect.dialog?[.99,1,1,.4]:rect.details?[.98,.99,1,.62]:rect.panel?[.98,.99,1,.5]:rect.tinted?[.35,.72,.95,.26]:[1,1,1,.42];
       const tint=darkTint.map((value,index)=>value+(lightTint[index]-value)*lightAmount);
-      const transparency=Math.max(0,Math.min(1,parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--glass-transparency'))||0));
       tint[3] *= 1 - transparency;
       gl.uniform4fv(uniforms.u_tint,tint);gl.uniform1f(uniforms.u_activity,rect.activity||0);gl.uniform1f(uniforms.u_strength,rect.cursor?2.1:rect.panel?2.35:1.7);
       gl.uniform1f(uniforms.u_blur,rect.blur||0);
@@ -364,15 +391,20 @@
     const video=document.getElementById('viewer-video');
     const videoPlaying=activeDialog?.id==='viewer'&&!video.hidden&&!video.paused&&video.readyState>=2;
     const busy=time-lastInteraction<1400||sceneDirty||videoPlaying;
-    if(!running||(!force&&(document.hidden||time-lastPaint<(reducedMotion.matches?250:themeFade?32:videoPlaying?33:busy?16:150))))return;
+    if(!running||(!force&&(document.hidden||time-lastPaint<(reducedMotion.matches?250:busy||themeFade?0:150))))return;
     const dt=Math.min(.032,(time-lastTick)/1000||.016);lastTick=time;lastPaint=time;
     updateCursor();
     const dialog=[...document.querySelectorAll('dialog[open]')].at(-1)||null;
-    if(dialog!==activeDialog){activeDialog=dialog;syncCursorLayer(dialog);sceneDirty=true;}
-    if(videoPlaying)sceneDirty=true;
-    if(sceneDirty||lastTheme!==document.documentElement.dataset.theme)captureScene();
+    if(dialog!==activeDialog){activeDialog=dialog;syncCursorLayer(dialog);sceneDirty=true;cursorLayerDirty=true;cursorPaintedPoint='';}
+    if(videoPlaying&&time-lastVideoCapture>=33){sceneDirty=true;lastVideoCapture=time;}
+    if(sceneDirty||lastTheme!==document.documentElement.dataset.theme){captureScene();cursorLayerDirty=true;}
     else if(themeFade)blendTheme(time);
-    paint(program,rectangles(null,dt),time);
+    // A modal blocks main-page interaction, so keep its background until the scene changes.
+    if(!activeDialog || (sceneRevision!==backgroundRevision&&!videoPlaying)){
+      paint(program,rectangles(null,dt),time);
+      backgroundRevision=sceneRevision;
+    }
+    const mergeTarget=findMergeTarget(activeDialog);
     if(modalCanvas&&activeDialog){
       // Top-layer dialogs need their own canvas; they cannot use the body's canvas.
       if(modalCanvas.target.parentNode!==activeDialog)activeDialog.prepend(modalCanvas.target);
@@ -380,18 +412,37 @@
       modalCanvas.target.style.left=`${-bounds.left}px`;
       modalCanvas.target.style.top=`${-bounds.top}px`;
       if(modalCanvas.target.hidden)modalCanvas.target.hidden=false;
-      paint(modalCanvas,rectangles(activeDialog,dt),time);
+      paint(modalCanvas,rectangles(activeDialog,dt,false,mergeTarget),time);
     }else if(modalCanvas&&!modalCanvas.target.hidden)modalCanvas.target.hidden=true;
+    if(cursorCanvas&&activeDialog){
+      // Dialog content sits above the surface canvas, so the pointer needs its own layer.
+      if(cursorCanvas.target.parentNode!==activeDialog)activeDialog.prepend(cursorCanvas.target);
+      const bounds=activeDialog.getBoundingClientRect();
+      cursorCanvas.target.style.left=`${-bounds.left}px`;
+      cursorCanvas.target.style.top=`${-bounds.top}px`;
+      if(cursorCanvas.target.hidden)cursorCanvas.target.hidden=false;
+      // Repaint this layer only while the pointer moves or the dialog changes: an idle extra
+      // full-screen WebGL pass is expensive next to the already-painted scene.
+      // Use the same frame as the button layer so their merge silhouettes stay in sync.
+      const point=cursorTarget.x+','+cursorTarget.y+','+(mergeTarget?.id||'')+','+cursorVisible;
+      if(point!==cursorPaintedPoint||cursorLayerDirty||themeFade||videoPlaying||time-lastInteraction<400){
+        cursorPaintedPoint=point;cursorLayerDirty=false;diagnostics.cursorPaints++;
+        paint(cursorCanvas,rectangles(activeDialog,dt,true,mergeTarget),time,true);
+      }
+    }else if(cursorCanvas&&!cursorCanvas.target.hidden){
+      cursorCanvas.target.hidden=true;cursorPaintedPoint='';
+    }
     diagnostics.frames++;diagnostics.surfaces=surfaceNodes.length;
   }
 
   function installMotion() {
-    document.addEventListener('pointermove',event=>{cursorTarget={x:event.clientX,y:event.clientY};cursorVisible=true;pointer={x:event.clientX,y:event.clientY};if(cursorElement){const bounds=activeDialog?.getBoundingClientRect();cursorElement.style.left=`${event.clientX-(bounds?.left||0)}px`;cursorElement.style.top=`${event.clientY-(bounds?.top||0)}px`;cursorElement.classList.add('is-visible');}hover=event.target.closest('.liquid-surface, #thumb-size');lastInteraction=performance.now();});
+    document.addEventListener('pointermove',event=>{cursorTarget={x:event.clientX,y:event.clientY};cursorVisible=true;updateCursor();hover=event.target.closest('.liquid-surface, #thumb-size');lastInteraction=performance.now();});
+    document.getElementById('context-menu').addEventListener('toggle',()=>{syncCursorLayer(activeDialog);updateCursor();sceneDirty=true;lastInteraction=performance.now();});
     document.addEventListener('pointerover',()=>{cursorVisible=true;});
     document.addEventListener('pointerout',event=>{if(!event.relatedTarget)cursorVisible=false;});
-    document.addEventListener('pointerdown',event=>{pressed=event.target.closest('button,input');pressed?.classList.add('is-pressed');cursorElement?.classList.add('is-pressed');diagnostics.animations++;lastInteraction=performance.now();});
-    document.addEventListener('pointerup',()=>{pressed?.classList.remove('is-pressed');pressed=null;cursorElement?.classList.remove('is-pressed');});
-    document.addEventListener('pointercancel',()=>{pressed?.classList.remove('is-pressed');pressed=null;cursorElement?.classList.remove('is-pressed');});
+    document.addEventListener('pointerdown',event=>{pressed=event.target.closest('button,input');pressed?.classList.add('is-pressed');cursorElement?.classList.add('is-pressed');cursorLayerDirty=true;diagnostics.animations++;lastInteraction=performance.now();});
+    document.addEventListener('pointerup',()=>{pressed?.classList.remove('is-pressed');pressed=null;cursorElement?.classList.remove('is-pressed');cursorLayerDirty=true;});
+    document.addEventListener('pointercancel',()=>{pressed?.classList.remove('is-pressed');pressed=null;cursorElement?.classList.remove('is-pressed');cursorLayerDirty=true;});
     document.addEventListener('input',()=>{sceneDirty=true;lastInteraction=performance.now();});
     document.addEventListener('scroll',()=>{sceneDirty=true;lastInteraction=performance.now();},true);
     document.addEventListener('load',()=>{sceneDirty=true;},true);
@@ -412,7 +463,7 @@
       };
       dialog.addEventListener('close',()=>{activeDialog=[...document.querySelectorAll('dialog[open]')].at(-1)||null;syncCursorLayer(activeDialog);beginDialogFade();sceneDirty=true;if(diagnostics.ready)animate(performance.now(),true);});
       dialog.close=value=>{
-        if(!dialog.open)return;
+        if(!dialog.open||closing)return;
         if(reducedMotion.matches){finishClose(value);return;}
         dialog.classList.add('is-closing');
         // Fade the panel; its ::backdrop fades via the CSS transition on dialog.is-closing::backdrop.
@@ -435,6 +486,9 @@
       blurredScene=document.createElement('canvas');blurCtx=blurredScene.getContext('2d',{alpha:false});
       const modal=document.createElement('canvas');modal.className='liquid-canvas modal-liquid-canvas';modal.setAttribute('aria-hidden','true');
       modalCanvas=makeRenderer(modal,vertex,fragment);
+      // A second full-viewport layer that draws only the pointer, so dialog content never covers it.
+      const cursorLayer=document.createElement('canvas');cursorLayer.className='liquid-canvas modal-cursor-canvas';cursorLayer.setAttribute('aria-hidden','true');
+      cursorCanvas=makeRenderer(cursorLayer,vertex,fragment);
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();running=false;document.documentElement.classList.remove('liquid-ready');diagnostics.ready=false;});
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
       refreshNodes();document.documentElement.classList.add('liquid-ready');
