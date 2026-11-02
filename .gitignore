@@ -19,3 +19,6 @@ dist/
 .qa/
 node_modules/
 updater.spec
+
+# macOS
+.DS_Store
