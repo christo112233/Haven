@@ -146,8 +146,11 @@ class LibraryIdentityTests(unittest.TestCase):
         self.assertEqual(metadata["rating"], 4)
         self.assertTrue(metadata["favorite"])
         self.assertEqual(metadata["tags"], ["keep"])
-        with sqlite3.connect(legacy) as check:
+        check = sqlite3.connect(legacy)
+        try:
             unmatched = check.execute("SELECT path FROM legacy_unmatched").fetchall()
+        finally:
+            check.close()
         self.assertEqual(unmatched, [(str(Path(self.temp.name) / "old" / "gone.jpg"),)])
         self.assertGreater(outside.lastrowid, 0)
 
@@ -155,8 +158,11 @@ class LibraryIdentityTests(unittest.TestCase):
         store = self.store(shared=True)
         file = self.photo("shared.jpg")
         store.reconcile([{"path": str(file)}])
-        with sqlite3.connect(library.database_path(self.library_dir)) as connection:
+        connection = sqlite3.connect(library.database_path(self.library_dir))
+        try:
             mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+        finally:
+            connection.close()
         self.assertEqual(mode.lower(), "delete")
         self.assertFalse(Path(str(store.path) + ".lock").exists())
 
