@@ -6,7 +6,10 @@ from config import IMAGES, RAW, HEIC, VIDEOS, SKIP
 
 
 def visible(entry):
-    if entry.name.lower() in SKIP or entry.is_symlink():
+    # macOS stores AppleDouble metadata as "._name" next to files on network
+    # shares; they often carry the same extension and must never be treated as
+    # media.
+    if entry.name.startswith("._") or entry.name.lower() in SKIP or entry.is_symlink():
         return False
     try:
         return not (getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0) & 6)
@@ -81,7 +84,7 @@ def scan(folder, recursive=False):
                     if ext not in IMAGES | VIDEOS:
                         continue
                     stat = entry.stat()
-                    signature = f"{stat.st_mtime_ns}:{stat.st_size}"
+                    signature = cache.signature(stat)
                     prior = old.get(entry.name, {})
                     item = dict(prior) if prior.get("signature") == signature else {}
                     item.update(path=entry.path, name=entry.name, ext=ext, size=stat.st_size,

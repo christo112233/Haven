@@ -1,10 +1,11 @@
 const {chromium} = require('../.qa/node_modules/playwright');
 const fs = require('fs');
+const path = require('path');
 const assert = require('assert');
 
 (async()=>{
-  const url = process.argv[2] || process.env.HAVEN_TEST_URL || fs.readFileSync('.qa/glass-server.log','utf8').trim();
-  const browser = await chromium.launch({args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+  const url = process.argv[2] || process.env.HAVEN_TEST_URL || fs.readFileSync(path.join(__dirname,'../.qa/server.log'),'utf8').trim();
+  const browser = await chromium.launch();
   const page = await browser.newPage({viewport:{width:1200,height:800}});
   let openCalls = 0, moveCalls = 0, failSource = null;
   const movedSources = [];
@@ -18,8 +19,9 @@ const assert = require('assert');
     await route.fulfill({contentType:'application/json',body:JSON.stringify({result:{path:target+'\\'+name,name,old_parent:source.replace(/[\\/][^\\/]+$/,''),parent:target}})});
   });
   await page.goto(url);
-  await page.waitForFunction(()=>window.havenGlass?.diagnostics.ready,{},{timeout:20000});
+  await page.waitForFunction(()=>state.job,{},{timeout:20000});
   await page.locator('#scan-progress').waitFor({state:'hidden',timeout:60000});
+  await page.waitForFunction(()=>state.total>0,{},{timeout:20000});
   await page.locator('.media-card').first().waitFor({state:'attached'});
   const paths = await page.evaluate(async()=>{
     const root=state.roots[0],entry=await api('folders',root);

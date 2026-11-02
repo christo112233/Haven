@@ -6,14 +6,14 @@ const assert = require('assert');
 (async () => {
   const url = process.argv[2];
   assert(url, 'Pass the preview URL as the first argument');
-  const browser = await chromium.launch({args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+  const browser = await chromium.launch();
   const created = [];
   try {
     const page = await browser.newPage({viewport:{width:1000,height:700}});
     const errors = [];
     page.on('pageerror',error=>errors.push(error.message));
     await page.goto(url);
-    await page.waitForFunction(()=>window.havenGlass?.diagnostics.ready&&state.roots.length);
+    await page.waitForFunction(()=>state.roots.length);
     const root = await page.evaluate(()=>state.roots[0]);
     const child = await page.evaluate(async root => (await api('folders',root)).children[0].path,root);
     await page.evaluate(async ({root,child})=>{
@@ -28,11 +28,9 @@ const assert = require('assert');
     await page.locator('[data-test-child]').click({button:'right'});
     assert(await page.locator('#context-menu').getByText('新建子文件夹').count()>0);
     assert.strictEqual(await page.locator('#context-menu').getByText('移除根目录').count(),0);
-    await page.waitForFunction(()=>getComputedStyle(document.querySelector('#glass-cursor')).opacity==='1');
-    await page.screenshot({path:'.qa/sidebar-context-cursor.png'});
+    await page.screenshot({path:'.qa/sidebar-context.png'});
     await page.locator('#context-menu').getByText('新建子文件夹').hover();
-    await page.waitForFunction(()=>getComputedStyle(document.querySelector('#glass-cursor')).opacity==='1');
-    await page.screenshot({path:'.qa/sidebar-context-cursor-inside.png'});
+    await page.screenshot({path:'.qa/sidebar-context-menu.png'});
     for(const [index,parent] of [child,null].entries()){
       const actualParent=parent||created[0];
       if(index===1){
@@ -50,7 +48,7 @@ const assert = require('assert');
       assert(fs.statSync(destination).isDirectory());
     }
     assert.deepStrictEqual(errors,[]);
-    console.log(JSON.stringify({passed:true,nestedLevels:2,cursor:'visible'}));
+    console.log(JSON.stringify({passed:true,nestedLevels:2}));
   } finally {
     await browser.close();
     for(const folder of created.reverse())if(fs.existsSync(folder))fs.rmdirSync(folder);

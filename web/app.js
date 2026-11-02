@@ -8,6 +8,13 @@ const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
 const bytes = value => value >= 1024**3 ? (value / 1024**3).toFixed(1) + ' GB' : value >= 1024**2 ? (value / 1024**2).toFixed(1) + ' MB' : Math.max(1, Math.round(value / 1024)) + ' KB';
 const date = value => new Date(value * 1000).toLocaleDateString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'});
 const duration = value => Math.floor((value || 0) / 60) + ':' + String(Math.floor((value || 0) % 60)).padStart(2, '0');
+// Platform-aware wording and path joining. Backend paths use the native
+// separator (POSIX on macOS, backslash on Windows).
+const isMac = () => state.platform === 'macos';
+const pathSeparator = () => isMac() ? '/' : '\\';
+const folderOpenLabel = () => isMac() ? '在访达中打开' : '在资源管理器中打开';
+const revealLabel = () => isMac() ? '在访达中显示' : '在资源管理器中显示';
+const trashLabel = () => isMac() ? '废纸篓' : '回收站';
 let toastTimer, searchTimer, folderSearchTimer, folderSearchRequest = 0, pollTimer, themeTransition, themeTarget = null, themeSequence = 0, renderScheduled = false, renderForcePending = false, detailsCloseTimer;
 let gridRenderGeneration = 0, renderedGridKey = '', renderingGridKey = '', gridDirty = true, subfolderRequest = 0, subfolderNavigation = 0, subfolderAnimation = null, stackRenderScheduled = false, stackResizeObserver = null;
 let moveQueue = Promise.resolve();
@@ -115,8 +122,25 @@ function initSidebarResize() {
   window.addEventListener('resize',apply);
   apply();
 }
+function waitForDesktopApi(method, timeout = 8000) {
+  return new Promise((resolve, reject) => {
+    const start = performance.now();
+    const check = () => {
+      if (window.pywebview?.api?.[method]) { resolve(); return; }
+      if (performance.now() - start > timeout) { reject(new Error(`桌面桥接尚未就绪：${method}`)); return; }
+      setTimeout(check, 30);
+    };
+    check();
+  });
+}
 async function api(method, ...args) {
-  if (window.pywebview?.api) return window.pywebview.api[method](...args);
+  // pywebview injects window.pywebview.api asynchronously; on a cold first
+  // launch it can briefly exist but still be empty. Wait for the specific
+  // method instead of calling undefined and showing a confusing bridge error.
+  if (window.pywebview) {
+    if (!window.pywebview.api?.[method]) await waitForDesktopApi(method);
+    return window.pywebview.api[method](...args);
+  }
   const response = await fetch('/api/' + method, {method:'POST', headers:{'Content-Type':'application/json','X-Haven-Token':window.HAVEN_TOKEN}, body:JSON.stringify(args)});
   const payload = await response.json();
   if (payload.error) throw new Error(payload.error);
@@ -208,49 +232,125 @@ function glassSelect(id) {
 }
 function syncSelect(id) { glassSelects.get(id)?.sync(); }
 function glassSelectNode(select, key) { select.dataset.glassSelectId = key; return glassSelect(select); }
+// <dialog>.showModal() focuses the first focusable element (usually the close
+// button). On WebKit that renders a keyboard focus ring as soon as the dialog
+// opens, which looks like a stray halo. Move initial focus to the dialog itself
+// instead; real inputs keep their own focus, and keyboard Tab still shows the
+// ring on the first control.
+const dialogShowModal = HTMLDialogElement.prototype.showModal;
+HTMLDialogElement.prototype.showModal = function(...args) {
+  const result = dialogShowModal.apply(this, args);
+  const active = document.activeElement;
+  if (!active || active === this || !this.contains(active)) return result;
+  if (active.matches('input:not([type="checkbox"]):not([type="range"]), textarea, select, [contenteditable="true"]')) return result;
+  this.setAttribute('tabindex', '-1');
+  this.focus({preventScroll: true});
+  return result;
+};
+
 function refreshSelectOptions(id) { const component = glassSelects.get(id); if (!component) return; component.menu.replaceChildren(); for (const option of component.select.options) { const item=document.createElement('button'); item.type='button'; item.className='select-option'; item.setAttribute('role','option'); item.dataset.value=option.value; item.textContent=option.textContent; item.onclick=()=>{component.close();if(component.select.value!==option.value){component.select.value=option.value;component.select.dispatchEvent(new Event('change',{bubbles:true}));}component.sync();}; component.menu.append(item); } component.sync(); icons(component.menu); }
 function closeSelects() { for (const component of glassSelects.values()) component.close(); }
-function theme(value) {
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+function resolveTheme(setting) {
+  return setting === 'system' ? (systemTheme.matches ? 'dark' : 'light') : (setting === 'light' ? 'light' : 'dark');
+}
+function theme(setting) {
   const root = document.documentElement;
-  $('theme-select').value = value;
+  if (!['dark', 'light', 'system'].includes(setting)) setting = 'dark';
+  state.themeSetting = setting;
+  const resolved = resolveTheme(setting);
+  $('theme-select').value = setting;
   syncSelect('theme-select');
-  if ((themeTarget || root.dataset.theme) !== value) {
-    themeTarget = value;
+  if (root.dataset.theme !== resolved) {
     if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       themeTransition?.skipTransition();
       const sequence = ++themeSequence;
       themeTransition = document.startViewTransition(() => {
         if (sequence !== themeSequence) return;
         root.classList.add('theme-capture');
-        root.dataset.theme = value;
-        window.havenGlass?.setThemeInstant?.();
+        root.dataset.theme = resolved;
       });
-      const complete = () => { if (sequence === themeSequence) { root.classList.remove('theme-capture'); themeTransition = null; themeTarget = null; } };
+      const complete = () => { if (sequence === themeSequence) { root.classList.remove('theme-capture'); themeTransition = null; } };
       themeTransition.finished.then(complete, complete);
     } else {
-      root.dataset.theme = value;
-      themeTarget = null;
+      root.dataset.theme = resolved;
     }
   }
-  safely(() => api('settings', {theme:value}));
+  safely(() => api('settings', {theme: setting}));
+  syncMenuState();
+}
+systemTheme.addEventListener('change', () => { if (state.themeSetting === 'system') theme('system'); });
+function applySidebarVisibility() {
+  document.body.classList.toggle('sidebar-hidden', Boolean(state.sidebarHidden));
+  syncMenuState();
+}
+function toggleSidebar() {
+  state.sidebarHidden = !state.sidebarHidden;
+  try { localStorage.setItem('haven.sidebar-hidden', state.sidebarHidden ? '1' : '0'); } catch (error) {}
+  applySidebarVisibility();
+}
+let menuStateTimer = 0;
+function syncMenuState() {
+  if (!state.desktop || state.platform !== 'macos') return;
+  clearTimeout(menuStateTimer);
+  menuStateTimer = setTimeout(() => {
+    const viewerOpen = Boolean(document.querySelector('#viewer[open]'));
+    const current = viewerOpen && state.current ? state.current.path : null;
+    const selection = [...state.selection];
+    const path = current || (selection.length === 1 ? selection[0] : null);
+    safely(() => api('menu_state', selection.length, viewerOpen, path || '', !state.sidebarHidden));
+  }, 120);
+}
+async function checkForUpdates(manual = true) {
+  const button = $('check-update');
+  const status = $('update-check-status');
+  if (button) button.disabled = true;
+  if (status) status.textContent = '正在检查…';
+  try {
+    const result = await api('check_update', manual);
+    const message = result.error || (result.available ? '发现新版本' : '已是最新版本');
+    if (status) status.textContent = message;
+    if (result.available) {
+      if ($('settings-dialog').open) $('settings-dialog').close();
+      showUpdate(result);
+    } else {
+      toast(message);
+    }
+    return result;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+function handleMenuCommand(detail) {
+  if (!detail) return;
+  if (typeof detail === 'string') detail = {type: detail};
+  switch (detail.type) {
+    case 'settings': $('settings-dialog').showModal(); break;
+    case 'check-updates': safely(() => checkForUpdates(true)); break;
+    case 'add-folder': safely(() => addFolder()); break;
+    case 'rescan': if (state.folder) safely(() => openFolder(state.folder)); break;
+    case 'toggle-sidebar': toggleSidebar(); break;
+    case 'theme': theme(detail.value); break;
+    case 'external': window.open(detail.value, '_blank', 'noopener'); break;
+    case 'shortcuts': $('settings-dialog').showModal(); toast('快捷键：←/→ 切换照片，Space 适应窗口，F 详情，Esc 关闭预览'); break;
+  }
 }
 function setGlassTransparency(value) {
   const ratio = Math.max(0, Math.min(1, Number(value) || 0));
   const percent = Math.round(ratio * 100);
   document.documentElement.style.setProperty('--glass-transparency', ratio.toFixed(2));
-  document.documentElement.style.setProperty('--glass-alpha-factor', (1 - ratio).toFixed(2));
+  document.documentElement.style.setProperty('--glass-alpha-factor', Math.max(.3, 1 - ratio).toFixed(2));
   const input = $('glass-transparency');
   const output = $('glass-transparency-value');
   if (input) input.value = String(percent);
   if (output) output.textContent = `${percent}%`;
-  window.havenGlass?.setTransparency?.(ratio);
 }
 function ensureTransparencyControl(initial) {
   const dialog = $('settings-dialog');
   if (!dialog || $('glass-transparency')) return;
   const row = document.createElement('div');
   row.className = 'settings-row transparency-row';
-  row.innerHTML = '<label for="glass-transparency">\u6db2\u6001\u73bb\u7483\u900f\u660e\u5ea6</label><div class="transparency-control"><input id="glass-transparency" type="range" min="0" max="100" step="1" aria-label="\u6db2\u6001\u73bb\u7483\u900f\u660e\u5ea6"><output id="glass-transparency-value" for="glass-transparency"></output></div>';
+  row.innerHTML = '<label for="glass-transparency">\u6bdb\u73bb\u7483\u900f\u660e\u5ea6</label><div class="transparency-control"><input id="glass-transparency" type="range" min="0" max="100" step="1" aria-label="\u6bdb\u73bb\u7483\u900f\u660e\u5ea6"><output id="glass-transparency-value" for="glass-transparency"></output></div>';
   dialog.querySelector('.dialog-heading')?.after(row);
   const input = $('glass-transparency');
   input.oninput = event => setGlassTransparency(Number(event.target.value) / 100);
@@ -458,7 +558,7 @@ function treeRow(path) {
   };
   row.oncontextmenu = event => {
     event.preventDefault();
-    const actions = [['folder-open','在资源管理器中打开',() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();refreshFolderSearch();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
+    const actions = [['folder-open',folderOpenLabel(),() => api('file_action',path,'open')],['refresh-cw','刷新',async () => {forgetTree(path);await renderTree();refreshFolderSearch();await openFolder(path);}],['brush-cleaning','清理缓存',async () => {if(await confirmAction('清理缓存', '删除此目录及子目录的 Haven 缩略图与预览缓存。原始照片不会删除。')) {await api('clean_cache',path,true);await openFolder(state.folder);}}]];
     actions.unshift(['pencil','重命名',() => renamePath(path,basename(path),true)]);
     actions.push(['folder-plus','新建子文件夹',() => createChildFolder(path)]);
     if (state.roots.includes(path)) {
@@ -563,7 +663,7 @@ async function openFolder(path,silent=false) {
   if($('grid').children.length){$('empty').hidden=true;}else{$('empty').hidden=false;$('empty').querySelector('h2').textContent='正在扫描文件夹…';$('empty-add').hidden=true;}
   $('folder-title').textContent=basename(path);$('folder-parent').textContent=path;$('folder-summary').textContent='正在读取本地文件';
   const segments = path.split(/[\\/]/).filter(Boolean);$('breadcrumbs').replaceChildren();
-  segments.forEach((name,index) => {if(index) {const arrow=document.createElement('i');arrow.dataset.lucide='chevron-right';$('breadcrumbs').append(arrow);}const button=document.createElement('button');button.textContent=name;button.title=name;button.onclick=()=>safely(()=>openFolder(segments.slice(0,index+1).join('\\')));$('breadcrumbs').append(button);}); icons($('breadcrumbs'));
+  segments.forEach((name,index) => {if(index) {const arrow=document.createElement('i');arrow.dataset.lucide='chevron-right';$('breadcrumbs').append(arrow);}const button=document.createElement('button');button.textContent=name;button.title=name;button.onclick=()=>safely(()=>openFolder(segments.slice(0,index+1).join(pathSeparator())));$('breadcrumbs').append(button);}); icons($('breadcrumbs'));
   }
   const epoch=state.epoch; const result=await api('open_folder',path,$('recursive').checked);if(epoch!==state.epoch)return;state.job=result.job;
   if(!silent)$('refresh').classList.add('is-scanning');
@@ -637,7 +737,7 @@ function toggleCardSelection(item,index,event){
   else if(state.selection.has(item.path))state.selection.delete(item.path);else state.selection.add(item.path);
   state.lastSelectedIndex=index;updateBulkToolbar();scheduleRender();
 }
-function updateBulkToolbar(){const bar=$('bulk-toolbar');if(!bar)return;bar.hidden=!state.selection.size;$('selection-count').textContent=`已选择 ${state.selection.size} 项`;const button=$('selection-mode');if(button){button.classList.toggle('is-active',state.selectionMode);button.setAttribute('aria-pressed',String(state.selectionMode));button.title=state.selectionMode?'退出选择模式':'选择照片';}const status=$('selection-mode-status');if(status)status.hidden=!state.selectionMode;}
+function updateBulkToolbar(){const bar=$('bulk-toolbar');if(!bar)return;bar.hidden=!state.selection.size;$('selection-count').textContent=`已选择 ${state.selection.size} 项`;const button=$('selection-mode');if(button){button.classList.toggle('is-active',state.selectionMode);button.setAttribute('aria-pressed',String(state.selectionMode));button.title=state.selectionMode?'退出选择模式':'选择照片';}const status=$('selection-mode-status');if(status)status.hidden=!state.selectionMode;syncMenuState();}
 function toggleSelectionMode(){state.selectionMode=!state.selectionMode;if(!state.selectionMode){state.selection.clear();state.lastSelectedIndex=null;}updateBulkToolbar();scheduleRender();}
 async function applyMetadata(paths,patch){const result=await api('update_photo_metadata',paths,patch);const mergeMeta=list=>{if(!list)return;for(const item of list){const key=Object.keys(result.metadata).find(candidate=>normalizeClientPath(candidate)===normalizeClientPath(item.path));const value=key&&result.metadata[key];if(value)Object.assign(item,value);}};for(const items of state.pages.values())mergeMeta(items);mergeMeta(state.stackCoverMembers);mergeMeta(state.stackMembers);if(state.current){const currentKey=Object.keys(result.metadata).find(candidate=>normalizeClientPath(candidate)===normalizeClientPath(state.current.path));if(currentKey)Object.assign(state.current,result.metadata[currentKey]);syncViewerMetadata();}const knownTags=await api('list_tags');$('tag-suggestions').replaceChildren(...knownTags.map(tag=>{const option=document.createElement('option');option.value=tag.name;return option;}));toast(`已更新 ${result.count} 项`);updateBulkToolbar();if(state.smartAlbum){const albumJob=await api('open_smart_album',state.smartAlbum);state.epoch++;state.job=albumJob.job;state.pages.clear();state.total=0;await poll(state.epoch);}else if(Object.keys(state.metadataFilters).length)await reloadFilter();else scheduleRender();}
 function normalizeClientPath(path){return String(path||'').replace(/[\\/]+/g,'/').toLowerCase();}
@@ -668,10 +768,10 @@ function promptColor(paths){
 }
 function selectedPaths(){return [...state.selection];}
 function isPicked(path){return Boolean(state.session)&&(state.session.picks||[]).some(p=>samePath(p,path));}
-function sessionTarget(){const s=state.session;if(!s)return '';const loc=(s.location||'').replace(/[\\/]+$/,'');const name=(s.name||'').trim();return loc&&name?loc+'\\'+name:loc||name;}
+function sessionTarget(){const s=state.session;if(!s)return '';const loc=(s.location||'').replace(/[\\/]+$/,'');const name=(s.name||'').trim();return loc&&name?loc+pathSeparator()+name:loc||name;}
 function defaultSessionName(){const d=new Date();return `选片 ${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function previewSessionPath(){$('session-preview').textContent=sessionTargetFromInputs();}
-function sessionTargetFromInputs(){const loc=($('session-location').value||'').replace(/[\\/]+$/,'');const name=($('session-name').value||'').trim();return loc&&name?loc+'\\'+name:loc||name;}
+function sessionTargetFromInputs(){const loc=($('session-location').value||'').replace(/[\\/]+$/,'');const name=($('session-name').value||'').trim();return loc&&name?loc+pathSeparator()+name:loc||name;}
 let sessionDialogMode='start';let pendingExportPaths=[];let pendingExportAction='export';let pendingExportEndsSession=false;
 async function persistSession(){await api('settings',{session:state.session});}
 function syncSessionUI(){
@@ -879,7 +979,7 @@ function contextMenu(event,actions){
   menu.style.top=Math.max(gap,Math.min(event.clientY,innerHeight-bounds.height-gap))+'px';
 }
 function cardActions(item){
-  return [['star','设置评分',()=>promptRating([item.path])],['heart',item.favorite?'取消收藏':'收藏',()=>toggleMetadata([item.path],'favorite')],['flag',item.flagged?'取消旗帜':'旗帜',()=>toggleMetadata([item.path],'flagged')],['circle-x',item.rejected?'取消 Rejected':'标记 Rejected',()=>toggleMetadata([item.path],'rejected')],['tag','管理标签',()=>promptTags([item.path])],['palette','颜色标签',()=>promptColor([item.path])],['pencil','重命名',()=>renamePath(item.path,item.name,false)],['folder-open','在资源管理器中显示',()=>api('file_action',item.path,'reveal')],['check-check',isPicked(item.path)?'移出本轮':'选入本轮',()=>{if(!state.session)openSessionDialog('start');else safely(()=>toggleRoundPick(item.path));}],['external-link','在外部编辑器中打开',()=>openExportDialog([item.path],'open')],['folder-output','导出到文件夹…',()=>openExportDialog([item.path],'export')],['trash-2','移到回收站',()=>trashItem(item)]];
+  return [['star','设置评分',()=>promptRating([item.path])],['heart',item.favorite?'取消收藏':'收藏',()=>toggleMetadata([item.path],'favorite')],['flag',item.flagged?'取消旗帜':'旗帜',()=>toggleMetadata([item.path],'flagged')],['circle-x',item.rejected?'取消 Rejected':'标记 Rejected',()=>toggleMetadata([item.path],'rejected')],['tag','管理标签',()=>promptTags([item.path])],['palette','颜色标签',()=>promptColor([item.path])],['pencil','重命名',()=>renamePath(item.path,item.name,false)],['folder-open',revealLabel(),()=>api('file_action',item.path,'reveal')],['check-check',isPicked(item.path)?'移出本轮':'选入本轮',()=>{if(!state.session)openSessionDialog('start');else safely(()=>toggleRoundPick(item.path));}],['external-link','在外部编辑器中打开',()=>openExportDialog([item.path],'open')],['folder-output','导出到文件夹…',()=>openExportDialog([item.path],'export')],['trash-2','移到回收站',()=>trashItem(item)]];
 }
 function requestRename(currentName,directory=false,heading=''){
   const dialog=$('rename-dialog'),input=$('rename-name'),form=$('rename-form');
@@ -907,20 +1007,20 @@ async function renamePath(path,currentName,directory=false){
   toast(`${directory?'文件夹':'文件'}已重命名`);
 }
 function confirmAction(title,description){$('confirm-title').textContent=title;$('confirm-description').textContent=description;$('confirm-dialog').showModal();return new Promise(resolve=>{const finish=value=>{$('confirm-dialog').close();resolve(value);};$('confirm-ok').onclick=()=>finish(true);$('confirm-cancel').onclick=()=>finish(false);$('confirm-dialog').oncancel=()=>resolve(false);});}
-async function trashItem(item){if(await confirmAction('移到回收站',`确认将「${item.name}」移到回收站？`)){await api('file_action',item.path,'trash',true);closeViewer(false);await openFolder(state.folder);toast('文件已移到回收站');}}
+async function trashItem(item){if(await confirmAction(`移到${trashLabel()}`,`确认将「${item.name}」移到${trashLabel()}？`)){await api('file_action',item.path,'trash',true);closeViewer(false);await openFolder(state.folder);toast(`文件已移到${trashLabel()}`);}}
 async function trashRejected(){
   if(!state.folder){toast('请先打开一个文件夹');return;}
   const recursive=$('recursive').checked;
   const {count}=await api('count_rejected',state.folder,recursive);
   if(!count){toast('没有已拒照片');return;}
   const scope=recursive?'当前文件夹（含子文件夹）':'当前文件夹';
-  if(!(await confirmAction('移入回收站',`将 ${scope} 中的 ${count} 张已拒照片移入回收站？`)))return;
+  if(!(await confirmAction(`移入${trashLabel()}`,`将 ${scope} 中的 ${count} 张已拒照片移入${trashLabel()}？`)))return;
   const result=await api('trash_rejected',state.folder,recursive,true);
   $('metadata-filter').hidden=true;closeSelects();
-  toast(`已移入回收站 ${result.count} 张`);
+  toast(`已移入${trashLabel()} ${result.count} 张`);
   await openFolder(state.folder);
 }
-function transform(){ $('viewer-image').style.transform=`translate(${state.x}px,${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;$('zoom-label').textContent=Math.round(state.scale*100)+'%';window.havenGlass?.refresh(); }
+function transform(){ $('viewer-image').style.transform=`translate(${state.x}px,${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;$('zoom-label').textContent=Math.round(state.scale*100)+'%'; }
 function fit(){state.scale=1;state.x=0;state.y=0;transform();}
 function setDetailsOpen(open){
   const details=$('details');
@@ -952,7 +1052,7 @@ async function showViewer(index){
     }catch(error){}
   }
   state.current=item;state.rotation=0;fit();
-  renderViewerItem(item);scheduleRender();
+  renderViewerItem(item);scheduleRender();syncMenuState();
 }
 function renderViewerItem(item){
   const inStack=Boolean(state.stackMembers);
@@ -1123,7 +1223,7 @@ function collectStackDialog(then){
   });
   return stackClosePromise;
 }
-function closeViewer(reopenStack=true){setDetailsOpen(false);$('viewer-video').pause();$('viewer').close();if(reopenStack&&state.stackExpand&&state.stackCoverMembers?.length){$('stack-dialog').showModal();renderStackList(state.stackCoverMembers,state.stackScrollTop||0);}scheduleRender();}
+function closeViewer(reopenStack=true){setDetailsOpen(false);$('viewer-video').pause();$('viewer').close();if(reopenStack&&state.stackExpand&&state.stackCoverMembers?.length){$('stack-dialog').showModal();renderStackList(state.stackCoverMembers,state.stackScrollTop||0);}scheduleRender();syncMenuState();}
 function showUpdate(result){if(!result.available)return;state.update=result.manifest;const data=state.update;$('update-version').textContent=`新版本 ${data.version}`;$('update-notes').textContent=data.notes||'新版本已发布';$('update-size').textContent=bytes(data.size);$('skip-update').hidden=!!data.mandatory;$('later-update').hidden=!!data.mandatory;$('download-progress').hidden=true;$('download-status').textContent='';$('install-update').disabled=false;if(!$('update-dialog').open)$('update-dialog').showModal();}
 async function installUpdate(){await api('install_update',true);$('install-update').disabled=true;$('skip-update').disabled=true;$('later-update').disabled=true;$('download-progress').hidden=false;const poll=async()=>{const progress=await api('update_progress');$('download-progress').value=progress.progress||0;$('download-status').textContent=progress.state==='error'?progress.error:progress.state==='restarting'?'正在重启…':`正在下载 ${progress.progress||0}%`;if(progress.state==='downloading')setTimeout(()=>safely(poll),500);else if(progress.state==='error'){$('install-update').disabled=false;$('skip-update').disabled=false;$('later-update').disabled=false;}};await poll();}
 function conditionRows(){return [...document.querySelectorAll('#smart-album-conditions .smart-condition')].map(row=>{const input=row.querySelector('input[data-value]'),color=row.querySelector('select[data-color-value]'),boolean=row.querySelector('input[data-boolean-value]');return {field:row.querySelector('select[data-field]').value,operator:row.querySelector('select[data-operator]').value,value:!boolean.parentElement.hidden?boolean.checked? 'true':'false':color&&!color.hidden?color.value:input?.value.trim()||''};}).filter(row=>row.value!==''||row.operator==='is_empty');}
@@ -1169,14 +1269,67 @@ function createSmartAlbum(){openSmartAlbumEditor();}
 function editSmartAlbum(album){openSmartAlbumEditor(album);}
 function bindSmartAlbumForm(){const form=$('smart-album-form');form.onsubmit=event=>safely(async()=>{event.preventDefault();const name=$('smart-album-name').value.trim();const conditions=conditionRows().map(row=>({field:row.field,operator:row.operator,value:row.operator==='is_empty'?'unrated':['favorite','flagged','rejected'].includes(row.field)?row.value.toLowerCase()==='true':row.field==='rating'?Number(row.value):row.value}));if(!name||!conditions.length)throw new Error('请填写相册名称并至少添加一个条件');const definition={logic:$('smart-album-logic').value,conditions};if(editingSmartAlbumId)await api('update_smart_album',editingSmartAlbumId,name,definition);else await api('create_smart_album',name,definition);dialogClose('smart-album-dialog');await renderSmartAlbums();});$('add-smart-condition').onclick=()=>{$('smart-album-conditions').append(buildConditionRow());};}
 function dialogClose(id){const dialog=$(id);if(dialog?.open)dialog.close();}
+
+function updateLibraryRow(){
+  const info=state.library; if(!info)return;
+  const label=$('library-path'); if(label){label.textContent=info.dir;label.title=info.dir;}
+  const warning=$('library-warning');
+  if(warning){const text=info.warning||(info.shared?'共享图库：标注会与其他设备同步。':'本机图库：仅保存在这台电脑。');warning.textContent=text;warning.hidden=!text;warning.classList.toggle('is-warning',Boolean(info.warning));}
+}
+async function changeLibrary(){
+  let target=null;
+  if(state.desktop){const picked=await api('pick_folder');target=picked?.path||null;}
+  else{const value=window.prompt('图库数据位置（NAS 上的共享目录）',state.library?.dir||'');target=value?value.trim():null;}
+  if(!target)return;
+  const ok=await confirmAction('切换图库数据位置',`将把评分、标签和智能相册迁移到：\n${target}\n\n照片、缩略图和设置不会移动。完成后界面会重新加载。`);
+  if(!ok)return;
+  toast('正在迁移图库数据…');
+  try{
+    const info=await api('set_library_dir',target);
+    state.library=info;updateLibraryRow();
+    toast('图库位置已更新，正在重新加载…');
+    setTimeout(()=>location.reload(),700);
+  }catch(error){toast(`图库迁移失败：${error.message||error}`);}
+}
+
+
+function initWindowDrag(){
+  // macOS: native title bar handles the top strip; our draggable regions call
+  // the small drag_window API so dragging does not depend on pywebview's JS
+  // fallback (which is chatty and buggy on multi-monitor setups).
+  if(state.platform!=='macos'||!state.desktop)return;
+  const regions=document.querySelectorAll('.pywebview-drag-region');
+  const interactive=target=>Boolean(target.closest('button,input,select,textarea,a,label,[role="button"],[data-no-drag]'));
+  let dragging=false,lastX=0,lastY=0;
+  regions.forEach(region=>{
+    region.addEventListener('pointerdown',event=>{
+      if(event.button!==0||event.isPrimary===false||interactive(event.target))return;
+      dragging=true;lastX=event.screenX;lastY=event.screenY;
+      try{region.setPointerCapture(event.pointerId);}catch(error){}
+      event.preventDefault();
+    });
+    region.addEventListener('pointermove',event=>{
+      if(!dragging)return;
+      const dx=event.screenX-lastX,dy=event.screenY-lastY;
+      if(!dx&&!dy)return;
+      lastX=event.screenX;lastY=event.screenY;
+      safely(()=>api('drag_window',dx,dy));
+    });
+    const stop=()=>{dragging=false;};
+    region.addEventListener('pointerup',stop);
+    region.addEventListener('pointercancel',stop);
+    region.addEventListener('lostpointercapture',stop);
+  });
+}
+
 async function init(){
   initScrollbars();
   initSidebarResize();
   glassSelect('filter-rating-op');glassSelect('filter-rating');glassSelect('filter-color');glassSelect('smart-album-logic');glassSelect('export-mode');glassSelect('export-action');glassSelect('export-editor');glassSelect('export-collision');glassSelect('export-mode-setting');
-  icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;state.exportMode=boot.state.export_mode||'copy';state.exportFolder=boot.state.export_folder||'';state.externalEditor=boot.state.external_editor||null;state.session=boot.state.session||null;state.stack=Boolean(boot.state.stack);document.documentElement.dataset.theme=boot.state.theme;$('theme-select').value=boot.state.theme;syncSelect('theme-select');$('export-mode-setting').value=state.exportMode;syncSelect('export-mode-setting');$('thumb-size').value=state.size;$('stack-toggle').checked=state.stack;$('stack-base-gap').value=boot.state.stack_base_gap??2;$('stack-factor').value=boot.state.stack_factor??1.5;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;ensureTransparencyControl(Number.isFinite(Number(boot.state.glass_transparency))?Number(boot.state.glass_transparency):.24);
+  icons();glassSelect('sort');glassSelect('theme-select');const boot=await api('bootstrap');state.platform=boot.platform||'windows';document.documentElement.dataset.platform=state.platform;document.documentElement.classList.toggle('platform-macos',state.platform==='macos');state.roots=boot.state.roots;state.expanded=new Set(boot.state.expanded);state.desktop=boot.desktop;state.size=boot.state.thumb_size||240;state.exportMode=boot.state.export_mode||'copy';state.exportFolder=boot.state.export_folder||'';state.externalEditor=boot.state.external_editor||null;state.session=boot.state.session||null;state.stack=Boolean(boot.state.stack);state.themeSetting=boot.state.theme||'dark';document.documentElement.dataset.theme=resolveTheme(state.themeSetting);$('theme-select').value=state.themeSetting;syncSelect('theme-select');$('export-mode-setting').value=state.exportMode;syncSelect('export-mode-setting');$('thumb-size').value=state.size;$('stack-toggle').checked=state.stack;$('stack-base-gap').value=boot.state.stack_base_gap??2;$('stack-factor').value=boot.state.stack_factor??1.5;document.documentElement.style.setProperty('--tile',state.size+'px');$('auto-update').checked=boot.state.auto_update;$('recursive').checked=!!boot.state.recursive;$('version').textContent=boot.version;ensureTransparencyControl(Number.isFinite(Number(boot.state.glass_transparency))?Number(boot.state.glass_transparency):.24);state.library=boot.library||null;updateLibraryRow();initWindowDrag();state.sidebarHidden=localStorage.getItem('haven.sidebar-hidden')==='1';applySidebarVisibility();syncMenuState();
   const knownTags=await api('list_tags');$('tag-suggestions').replaceChildren(...knownTags.map(tag=>{const option=document.createElement('option');option.value=tag.name;return option;}));
-  $('window-controls').hidden=!state.desktop;
-  $('resize-grip').hidden=!state.desktop;
+  $('window-controls').hidden=!state.desktop||state.platform!=='windows';
+  $('resize-grip').hidden=!state.desktop||state.platform==='macos';
   $('window-controls').onclick=event=>{const button=event.target.closest('[data-window-action]');if(button)safely(()=>api('window_action',button.dataset.windowAction));};
   const WINDOW_DRAG_BLOCKED='button,input,select,textarea,a,label,[role="button"],[data-no-drag]';
   if(state.desktop)for(const region of document.querySelectorAll('.pywebview-drag-region')){
@@ -1198,7 +1351,7 @@ async function init(){
   $('folder-search').onkeydown=event=>{if(event.key==='Escape'){$('folder-search').value='';updateFolderSearch();}else if(event.key==='Enter'){event.preventDefault();$('folder-search-results').querySelector('.folder-search-result')?.click();}};
   $('subfolders-toggle').onclick=toggleSubfolders;
   $('up-folder').onclick=()=>safely(async()=>{if(!state.folder)return;const parent=state.folder.replace(/[\\/][^\\/]+[\\/]?$/,'');if(parent&&parent!==state.folder)await openFolder(parent);});
-  $('theme-button').onclick=()=>theme((themeTarget||document.documentElement.dataset.theme)==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
+  $('theme-button').onclick=()=>theme(document.documentElement.dataset.theme==='dark'?'light':'dark');$('theme-select').onchange=event=>theme(event.target.value);
   $('search').oninput=event=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=event.target.value;safely(reloadFilter);},200);};
   $('filters').onclick=event=>{const button=event.target.closest('[data-kind]');if(!button)return;state.kind=button.dataset.kind;for(const tab of $('filters').children)tab.setAttribute('aria-selected',tab===button);safely(reloadFilter);};
   $('metadata-filter-button').onclick=event=>{event.stopPropagation();const panel=$('metadata-filter');panel.hidden=!panel.hidden;if(panel.hidden)closeSelects();else positionMetadataFilter();};$('metadata-filter-close').onclick=()=>{$('metadata-filter').hidden=true;closeSelects();};$('filter-apply').onclick=()=>{state.metadataFilters=readMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};$('filter-clear').onclick=()=>{clearMetadataFilters();$('metadata-filter').hidden=true;closeSelects();safely(reloadFilter);};$('trash-rejected').onclick=()=>safely(trashRejected);
@@ -1299,11 +1452,11 @@ async function init(){
   document.addEventListener('scroll',event=>{if(!event.target.closest?.('#context-menu'))closeContextMenu();},true);
   document.querySelectorAll('dialog').forEach(dialog=>dialog.addEventListener('close',closeContextMenu));
   $('settings-button').onclick=()=>$('settings-dialog').showModal();document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
-  $('auto-update').onchange=event=>safely(()=>api('settings',{auto_update:event.target.checked}));$('history').onclick=()=>safely(()=>api('release_history'));
-  $('check-update').onclick=()=>safely(async()=>{$('check-update').disabled=true;$('update-check-status').textContent='正在检查…';try{const result=await api('check_update',true);$('update-check-status').textContent=result.error||(result.available?'发现新版本':'已是最新版本');if(result.available){$('settings-dialog').close();showUpdate(result);}}finally{$('check-update').disabled=false;}});
+  $('auto-update').onchange=event=>safely(()=>api('settings',{auto_update:event.target.checked}));$('library-change').onclick=()=>safely(changeLibrary);$('history').onclick=()=>safely(()=>api('release_history'));
+  $('check-update').onclick=()=>safely(()=>checkForUpdates(true));
   $('later-update').onclick=()=>$('update-dialog').close();$('skip-update').onclick=()=>safely(async()=>{await api('settings',{skipped_version:state.update.version});$('update-dialog').close();});$('install-update').onclick=()=>safely(installUpdate);$('update-dialog').oncancel=event=>{if(state.update?.mandatory||$('install-update').disabled)event.preventDefault();};
   $('sidebar').ondragover=event=>{event.preventDefault();$('sidebar').classList.add('drag-over');};$('sidebar').ondragleave=()=>$('sidebar').classList.remove('drag-over');$('sidebar').ondrop=event=>{event.preventDefault();$('sidebar').classList.remove('drag-over');if(state.desktop)return;for(const file of event.dataTransfer.files){const path=file.pywebviewFullPath||file.path;if(path)safely(()=>addFolder(path));}};
-  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;if(event.detail.expanded)state.expanded=new Set(event.detail.expanded);else state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();refreshFolderSearch();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));
+  window.addEventListener('haven:folder-added',event=>safely(async()=>{state.roots=event.detail.roots;if(event.detail.expanded)state.expanded=new Set(event.detail.expanded);else state.expanded.add(event.detail.path);await api('settings',{expanded:[...state.expanded]});await renderTree();refreshFolderSearch();await openFolder(event.detail.path);}));window.addEventListener('haven:update',event=>showUpdate(event.detail));window.addEventListener('haven:error',event=>toast(event.detail.message));window.addEventListener('haven:menu',event=>handleMenuCommand(event.detail));window.addEventListener('haven:toast',event=>toast(typeof event.detail==='string'?event.detail:(event.detail&&event.detail.message)||''));
   syncSessionUI();
   await renderTree();await renderSmartAlbums();if(boot.state.current&&state.roots.length)await openFolder(boot.state.current);
 }

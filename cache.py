@@ -9,6 +9,19 @@ import uuid
 
 from config import CACHE_NAME, CACHE_VERSION
 
+# Absolute paths must never be persisted in the shared scan index: the same
+# photo directory can be mounted at a different path on another platform.
+VOLATILE_FIELDS = ("path", "live_path", "stack_members", "_root_id", "_rel_path")
+
+
+def signature(stat):
+    """Platform-neutral cache signature (whole-second mtime + size).
+
+    Network filesystems expose timestamps with different precision on Windows
+    and macOS; nanosecond sums make each platform invalidate the other's cache.
+    """
+    return f"{int(stat.st_mtime)}:{stat.st_size}"
+
 
 def atomic_json(path, value):
     path = Path(path)
@@ -91,7 +104,11 @@ def load(folder):
 
 
 def save(folder, files):
-    atomic_json(directory(folder) / "index.json", {"version": CACHE_VERSION, "files": files})
+    portable = {
+        name: {key: value for key, value in item.items() if key not in VOLATILE_FIELDS}
+        for name, item in files.items()
+    }
+    atomic_json(directory(folder) / "index.json", {"version": CACHE_VERSION, "files": portable})
 
 
 def clean(folder):

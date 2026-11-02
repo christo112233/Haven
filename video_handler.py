@@ -4,7 +4,9 @@ import subprocess
 import imageio_ffmpeg
 from PIL import Image
 
-FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if hasattr(subprocess, "CREATE_NO_WINDOW") else {}
+import platform_support
+
+FLAGS = platform_support.subprocess_flags()
 
 
 def metadata(path):

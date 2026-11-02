@@ -21,6 +21,7 @@ from api import Api
 import cache
 import config
 import metadata
+import platform_support
 import scanner
 import server
 import thumbs
@@ -98,7 +99,7 @@ class CoreTests(unittest.TestCase):
     def test_photo_metadata_batch_updates_and_path_migration(self):
         from metadata_store import MetadataStore
         first, second = self.photo("first.jpg"), self.photo("second.jpg")
-        store = MetadataStore(self.root / "metadata.sqlite3")
+        store = MetadataStore(self.root / "metadata.sqlite3", roots=[str(self.root)])
         try:
             items = [{"path": str(first)}, {"path": str(second)}]
             store.reconcile(items)
@@ -127,7 +128,7 @@ class CoreTests(unittest.TestCase):
     def test_smart_album_definition_and_rating_filter(self):
         from metadata_store import MetadataStore
         photo = self.photo("album.jpg")
-        store = MetadataStore(self.root / "metadata.sqlite3")
+        store = MetadataStore(self.root / "metadata.sqlite3", roots=[str(self.root)])
         try:
             store.reconcile([{"path": str(photo)}])
             store.update([str(photo)], {"rating": 5, "tags_add": ["家人"]})
@@ -214,12 +215,19 @@ class CoreTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     api.window_action("maximize")
                 api.window = Mock()
-                api.window_action("maximize")
-                self.assertTrue(api._maximized)
-                api.window.maximize.assert_called_once()
-                api.window_action("maximize")
-                self.assertFalse(api._maximized)
-                api.window.restore.assert_called_once()
+                if platform_support.IS_MACOS:
+                    with patch("platform_support.macos_zoom") as zoom:
+                        api.window_action("maximize")
+                        zoom.assert_called_once()
+                        api.window_action("maximize")
+                        self.assertEqual(zoom.call_count, 2)
+                else:
+                    api.window_action("maximize")
+                    self.assertTrue(api._maximized)
+                    api.window.maximize.assert_called_once()
+                    api.window_action("maximize")
+                    self.assertFalse(api._maximized)
+                    api.window.restore.assert_called_once()
                 api.window_action("minimize")
                 api.window.minimize.assert_called_once()
                 with self.assertRaises(ValueError):
@@ -530,28 +538,42 @@ class CoreTests(unittest.TestCase):
             api = Api()
             try:
                 api.add_folder(str(self.root))
-                with patch("subprocess.Popen") as popen, patch("os.startfile") as startfile:
+                with patch("platform_support.open_defaults") as defaults, patch("platform_support.open_with_editor") as editor:
                     api.open_external([str(photo)], "default")
-                    startfile.assert_called_once_with(str(photo))
-                    popen.assert_not_called()
+                    defaults.assert_called_once_with([str(photo)])
+                    editor.assert_not_called()
                 dummy = self.root / "editor.exe"; dummy.write_text("x")
                 api.state["external_editor"] = {"id": "custom", "name": "TestEditor", "exe": str(dummy)}
-                with patch("subprocess.Popen") as popen:
+                with patch("platform_support.open_with_editor") as editor:
                     api.open_external([str(photo)], "custom")
-                    popen.assert_called_once_with([str(dummy), str(photo)])
+                    editor.assert_called_once_with(str(dummy), [str(photo)])
             finally:
                 api.pool.shutdown(); api.raw_pool.shutdown()
 
-    def test_detect_editors_returns_default_and_windows_entries(self):
+    def test_windows_window_action_branch(self):
+        with patch("config.STATE_PATH", self.root / "settings.json"), patch("platform_support.IS_MACOS", False):
+            api = Api()
+            try:
+                api.window = Mock()
+                api.window_action("maximize")
+                self.assertTrue(api._maximized)
+                api.window.maximize.assert_called_once()
+                api.window_action("maximize")
+                self.assertFalse(api._maximized)
+                api.window.restore.assert_called_once()
+            finally:
+                api.pool.shutdown(); api.raw_pool.shutdown()
+
+    def test_detect_editors_returns_platform_entries(self):
         with patch("config.STATE_PATH", self.root / "settings.json"):
             api = Api()
             try:
                 editors = api.detect_editors()
-                ids = {editor["id"] for editor in editors}
-                self.assertIn("default", ids)
+                ids = [editor["id"] for editor in editors]
+                self.assertEqual(ids[:1], ["default"])
+                self.assertIn("photoshop", ids)
+                self.assertIn("lightroom", ids)
                 self.assertTrue(all("name" in editor and "available" in editor for editor in editors))
-                with patch("os.name", "posix"):
-                    self.assertEqual([editor["id"] for editor in api.detect_editors()], ["default"])
             finally:
                 api.pool.shutdown(); api.raw_pool.shutdown()
 

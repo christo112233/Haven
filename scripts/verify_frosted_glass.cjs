@@ -68,7 +68,13 @@ const assert = require('assert');
       if (style.webkitBackdropFilter) assert(style.webkitBackdropFilter.includes('blur('), `${name} -webkit-backdrop-filter must keep the blur: ${JSON.stringify(style)}`);
     };
     assertFrost('#sidebar', sidebarFrost.sidebar);
-    assert(sidebarFrost.prefixedFallback, 'The stylesheet must keep the -webkit-backdrop-filter fallback for WebView2');
+    // Chromium drops the prefixed alias from the parsed CSSOM, so check the
+    // served stylesheet source instead of computed styles/rules.
+    const cssSource = await page.evaluate(async () => {
+      const link = document.querySelector('link[rel="stylesheet"]');
+      return link ? await (await fetch(link.href)).text() : '';
+    });
+    assert(cssSource.includes('-webkit-backdrop-filter'), 'The stylesheet must keep the -webkit-backdrop-filter fallback for WebView2/WebKit');
 
     await page.evaluate(() => theme('dark'));
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark' && !document.documentElement.classList.contains('theme-capture'));
@@ -85,6 +91,13 @@ const assert = require('assert');
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     assert.strictEqual(await page.locator('html').getAttribute('data-theme'), 'dark', 'Theme button must switch back to dark');
 
+    // Restore the default transparency before the dialog screenshot so the
+    // persisted "fully transparent" value from an earlier run does not make
+    // the panel invisible.
+    await page.evaluate(() => {
+      const input = document.querySelector('#glass-transparency');
+      if (input) { input.value = '24'; input.dispatchEvent(new Event('input', {bubbles:true})); }
+    });
     await page.locator('#settings-button').click();
     await page.locator('#settings-dialog').waitFor({state:'visible'});
     assert(await page.locator('#settings-dialog').evaluate(dialog => dialog.open), 'Settings dialog must open');
@@ -95,10 +108,17 @@ const assert = require('assert');
       return {backdropFilter: style.backdropFilter || '', webkitBackdropFilter: typeof style.webkitBackdropFilter === 'string' ? style.webkitBackdropFilter : ''};
     });
     assertFrost('#settings-dialog.panel-dialog', dialogFrost);
+    const dialogAlpha = await page.locator('#settings-dialog').evaluate(dialog => {
+      const value = getComputedStyle(dialog).backgroundColor;
+      const match = value.match(/\/\s*([0-9.]+)\s*\)/);
+      return match ? Number(match[1]) : 1;
+    });
+    assert(dialogAlpha > 0.4, `Settings dialog must stay readable at the default transparency: ${dialogAlpha}`);
     const slider = page.locator('#glass-transparency');
     await slider.waitFor({state:'visible'});
     assert(await slider.isEnabled(), 'Glass transparency slider must be interactable');
     assert.strictEqual(await slider.getAttribute('max'), '100', 'Glass transparency slider must keep the 0..100 range');
+    await page.waitForTimeout(350);  // let the dialog open animation finish
     await page.screenshot({path:'.qa/frosted-dialog.png'});
 
     const readAlphaFactor = () => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--glass-alpha-factor')));
@@ -115,8 +135,8 @@ const assert = require('assert');
     const [factorOpaque, factorMiddle, factorTransparent] = factors;
     assert(factorOpaque >= 0.9, `Slider 0 must keep the glass nearly opaque: ${factors}`);
     assert(factorMiddle > factorTransparent + 0.1 && factorMiddle < factorOpaque - 0.1, `Middle transparency must sit between the extremes: ${factors}`);
-    assert(factorTransparent >= 0.15 && factorTransparent <= 0.3, `Alpha factor must be clamped to roughly 0.2 at full transparency: ${factors}`);
-    assert(factors.every(factor => factor >= 0.15 && factor <= 1.01), `Alpha factor must stay within the clamped range: ${factors}`);
+    assert(factorTransparent >= 0.25 && factorTransparent <= 0.4, `Alpha factor must be clamped to roughly 0.3 at full transparency: ${factors}`);
+    assert(factors.every(factor => factor >= 0.25 && factor <= 1.01), `Alpha factor must stay within the clamped range: ${factors}`);
 
     const persisted = page.waitForRequest(request => request.url().includes('/api/settings') && (request.postData() || '').includes('glass_transparency'), {timeout:5000});
     await slider.evaluate(input => {

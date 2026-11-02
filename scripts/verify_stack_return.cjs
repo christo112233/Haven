@@ -4,12 +4,12 @@ const assert = require('assert');
 
 (async () => {
   const url=process.argv[2]||process.env.HAVEN_URL||fs.readFileSync('.qa/smooth-server.log','utf8').replace(/^\uFEFF/,'').trim();
-  const browser=await chromium.launch({args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+  const browser=await chromium.launch();
   try {
     const page=await browser.newPage({viewport:{width:1440,height:920}});
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto(url);
-    await page.waitForFunction(()=>havenGlass.diagnostics.ready&&state.total>0);
+    await page.waitForFunction(()=>state.total>0);
     await page.evaluate(async()=>{
       const source=await ensureItem(0),backend=api;
       window.returnMembers=Array.from({length:180},(_,index)=>({...source,name:`Return-${index}.jpg`}));

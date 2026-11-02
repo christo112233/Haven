@@ -4,7 +4,7 @@ const path = require('path');
 const assert = require('assert');
 
 (async () => {
-  const browser = await chromium.launch({args:process.argv.includes('--disable-webgl')?['--disable-webgl']:[]});
+  const browser = await chromium.launch();
   const page = await browser.newPage({viewport:{width:1440,height:920}});
   const errors = [];
   page.on('pageerror',error=>errors.push(error.message));
@@ -126,7 +126,6 @@ const assert = require('assert');
   await page.setViewportSize({width:1440,height:920});
   await page.locator('#theme-button').click();
   assert.deepStrictEqual(errors,[]);
-  const glassBackend=await page.evaluate(()=>window.havenGlass?.diagnostics.backend);
-  console.log(JSON.stringify({passed:true,virtualCardCount:firstCount,virtualCounts,sameRowMutations,frameTiming,glassBackend,screenshots:6,errors}));
+  console.log(JSON.stringify({passed:true,virtualCardCount:firstCount,virtualCounts,sameRowMutations,frameTiming,screenshots:6,errors}));
   await browser.close();
 })().catch(error=>{console.error(error);process.exit(1);});

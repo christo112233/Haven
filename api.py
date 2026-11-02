@@ -3,15 +3,16 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import threading
 import uuid
 
 from send2trash import send2trash
 import cache
 import config
+import library
 import metadata
 import metadata_store
+import platform_support
 import scanner
 import thumbs
 
@@ -27,10 +28,8 @@ def process_item(item):
 
 
 def path_contains(parent, path):
-    """True when path is parent itself or lives inside it (Windows-friendly, case-insensitive)."""
-    parent = os.path.normcase(os.path.abspath(parent))
-    path = os.path.normcase(os.path.abspath(path))
-    return path == parent or path.startswith(parent.rstrip("\\/") + os.sep)
+    """True when path is parent itself or lives inside it (platform-aware)."""
+    return platform_support.contains_path(parent, path)
 
 
 class Api:
@@ -45,13 +44,16 @@ class Api:
         self.state.setdefault("theme", "dark")
         self.state.setdefault("thumb_size", 240)
         self.state.setdefault("glass_transparency", 0.24)
-        self.store = metadata_store.MetadataStore(config.METADATA_DB_PATH)
+        self.state.setdefault("library_dir", "")
+        self.state.setdefault("root_ids", {})
         # Older states could store a folder and its own subfolder as separate roots.
         if self._merge_roots():
             try:
                 cache.atomic_json(config.STATE_PATH, self.state)
             except OSError:
                 pass
+        self.library_warning = ""
+        self._open_library()
         self.jobs = {}
         self.export_jobs = {}
         self.lock = threading.RLock()
@@ -60,9 +62,149 @@ class Api:
         self.raw_pool = ProcessPoolExecutor(max_workers=min(4, os.cpu_count() or 1))
         self.update = None
         self.download_status = {"state": "idle"}
+        # Mirrors the frontend selection/viewer state for the macOS menu's
+        # dynamic enable/checkmark logic.
+        self.menu_snapshot = {"selection": 0, "viewer": False, "path": None, "sidebar": True}
+
+    def _data_dir(self):
+        return Path(config.STATE_PATH).parent
+
+    def _open_library(self):
+        """Open the annotation library, migrating a legacy local database."""
+        data_dir = self._data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        configured = str(self.state.get("library_dir") or "").strip()
+        directory = Path(configured).expanduser() if configured else data_dir / "library"
+        try:
+            info = library.ensure_library(directory)
+        except OSError as exc:
+            self.library_warning = f"图库数据目录不可用，已临时使用本机目录：{exc}"
+            directory = data_dir / "library"
+            info = library.ensure_library(directory)
+        self.library_dir = directory
+        self.library_id = info["library_id"]
+        self._register_roots()
+        legacy_db = data_dir / "haven-metadata.sqlite3"
+        db_path = library.database_path(directory)
+        try:
+            library.adopt_database(legacy_db, db_path)
+        except Exception as exc:  # noqa: BLE001 - surface any copy failure as a warning
+            self.library_warning = self.library_warning or f"旧版本地标注数据库迁移失败：{exc}"
+        self.store = metadata_store.MetadataStore(
+            db_path,
+            roots=self.state["roots"],
+            root_ids=self.root_ids,
+            shared=library.is_shared_location(directory, data_dir),
+        )
+        if self.store.migration_report:
+            report = self.store.migration_report
+            if report.get("unmatched"):
+                self.library_warning = self.library_warning or f"迁移完成，但有 {report['unmatched']} 条旧标注无法匹配当前照片目录"
+        try:
+            library.maybe_backup(db_path, directory)
+        except OSError:
+            pass
+
+    def _register_roots(self):
+        """Resolve a stable root_id for every configured photo root."""
+        cached = self.state.get("root_ids", {})
+        resolved = {}
+        changed = False
+        for root in self.state.get("roots", []):
+            key = str(root)
+            marker = None
+            try:
+                marker = library.ensure_root_marker(key, self.library_id)
+            except OSError:
+                marker = None
+            if marker and marker.get("root_id"):
+                resolved[key] = marker["root_id"]
+            else:
+                root_id = cached.get(key) or uuid.uuid4().hex
+                resolved[key] = root_id
+                changed = True
+        if resolved != cached:
+            self.state["root_ids"] = resolved
+            changed = True
+        self.root_ids = resolved
+        if changed:
+            try:
+                cache.atomic_json(config.STATE_PATH, self.state)
+            except OSError:
+                pass
+        return resolved
+
+    def _sync_store_roots(self):
+        self._register_roots()
+        if getattr(self, "store", None) is not None:
+            self.store.set_roots(self.state["roots"], self.root_ids)
+
+    def _library_payload(self):
+        return {
+            "dir": str(self.library_dir),
+            "id": self.library_id,
+            "shared": library.is_shared_location(self.library_dir, self._data_dir()),
+            "warning": self.library_warning,
+        }
 
     def bootstrap(self):
-        return {"state": self.state, "version": config.VERSION, "base_url": self.base_url, "desktop": self.window is not None}
+        platform = "macos" if config.IS_MACOS else "windows" if config.IS_WINDOWS else "linux"
+        return {
+            "state": self.state,
+            "version": config.VERSION,
+            "base_url": self.base_url,
+            "desktop": self.window is not None,
+            "platform": platform,
+            "library": self._library_payload(),
+        }
+
+    def library_info(self):
+        return self._library_payload()
+
+    def set_library_dir(self, path):
+        """Move the annotation library to a user-selected directory.
+
+        The next machine that points at the same directory (for example a NAS
+        folder) reads and writes the same ratings, tags and smart albums.
+        """
+        target = Path(str(path or "").strip()).expanduser() if str(path or "").strip() else self._data_dir() / "library"
+        target = target.resolve()
+        if target == self.library_dir.resolve():
+            return self._library_payload()
+        info = library.ensure_library(target)
+        new_db = library.database_path(target)
+        if not new_db.exists():
+            library.adopt_database(library.database_path(self.library_dir), new_db)
+        previous = self.store
+        previous_dir, previous_id = self.library_dir, self.library_id
+        try:
+            previous.close()
+            self.library_dir = target
+            self.library_id = info["library_id"]
+            self._register_roots()
+            self.store = metadata_store.MetadataStore(
+                new_db,
+                roots=self.state["roots"],
+                root_ids=self.root_ids,
+                shared=library.is_shared_location(target, self._data_dir()),
+            )
+        except Exception:
+            # Restore the previous library so the session stays usable.
+            self.library_dir, self.library_id = previous_dir, previous_id
+            self._register_roots()
+            self.store = metadata_store.MetadataStore(
+                library.database_path(previous_dir),
+                roots=self.state["roots"],
+                root_ids=self.root_ids,
+                shared=library.is_shared_location(previous_dir, self._data_dir()),
+            )
+            raise
+        self.state["library_dir"] = str(target)
+        try:
+            cache.atomic_json(config.STATE_PATH, self.state)
+        except OSError as exc:
+            return {"warning": f"图库位置已切换，但设置无法保存：{exc}", **self._library_payload()}
+        return self._library_payload()
 
     def window_action(self, action):
         if self.window is None:
@@ -70,7 +212,9 @@ class Api:
         if action == "minimize":
             self.window.minimize()
         elif action == "maximize":
-            if self._maximized:
+            if platform_support.IS_MACOS:
+                platform_support.macos_zoom(self.window)
+            elif self._maximized:
                 self.window.restore()
                 self._maximized = False
             else:
@@ -81,6 +225,25 @@ class Api:
         else:
             raise ValueError("未知窗口操作")
         return {"ok": True}
+
+    def menu_state(self, selection=0, viewer=False, path="", sidebar=True):
+        try:
+            count = max(0, int(selection))
+        except (TypeError, ValueError):
+            count = 0
+        self.menu_snapshot = {
+            "selection": count,
+            "viewer": bool(viewer),
+            "path": str(path) if path else None,
+            "sidebar": bool(sidebar),
+        }
+        return {"ok": True}
+
+    def drag_window(self, dx, dy):
+        if not platform_support.IS_MACOS or self.window is None:
+            return {"ok": False}
+        moved = platform_support.move_window_by(self.window, float(dx), float(dy))
+        return {"ok": bool(moved)}
 
     def resize_window(self, width, height):
         if self.window is None:
@@ -138,11 +301,12 @@ class Api:
             self._merge_roots()
             expanded = set(self.state.get("expanded", []))
             expanded.add(str(folder))
-            owner = next((root for root in self.state["roots"] if path_contains(root, str(folder)) and os.path.normcase(root) != os.path.normcase(str(folder))), None)
+            owner = next((root for root in self.state["roots"] if path_contains(root, str(folder)) and not platform_support.same_path(root, str(folder))), None)
             if owner:
                 expanded.add(owner)
                 expanded.update(self._ancestors(str(folder), owner))
             self.state["expanded"] = sorted(expanded)
+            self._sync_store_roots()
             self.settings({"current": str(folder)})
         return {"path": str(folder), "roots": self.state["roots"], "expanded": self.state["expanded"]}
 
@@ -152,14 +316,22 @@ class Api:
             self._merge_roots()
             if self.state.get("current", "").startswith(path):
                 self.state["current"] = self.state["roots"][0] if self.state["roots"] else ""
+            self._sync_store_roots()
             self.settings({})
         return self.state
+
+    @staticmethod
+    def _public_item(item):
+        return {key: value for key, value in item.items() if key != "file_key" and not key.startswith("_")}
+
+    def _is_root(self, path):
+        return any(platform_support.same_path(root, path) for root in self.state.get("roots", []))
 
     def _ancestors(self, folder, root):
         """Folders strictly between root and folder, nearest first."""
         steps = []
         current = Path(folder).parent
-        while path_contains(root, str(current)) and os.path.normcase(str(current)) != os.path.normcase(root):
+        while path_contains(root, str(current)) and not platform_support.same_path(str(current), root):
             steps.append(str(current))
             if current.parent == current:
                 break
@@ -183,7 +355,7 @@ class Api:
         expanded = set(self.state.get("expanded", []))
         for folder in nested:
             owner = next((root for root in merged if path_contains(root, folder)), None)
-            if owner and os.path.normcase(owner) != os.path.normcase(folder):
+            if owner and not platform_support.same_path(owner, folder):
                 # Expand the folder that absorbed it, so the nested folder stays visible.
                 expanded.add(owner)
                 expanded.update(self._ancestors(folder, owner))
@@ -277,7 +449,7 @@ class Api:
             if not job:
                 raise ValueError("浏览任务已失效")
             filters = filters or {}
-            items = [dict(item) for item in job["items"] if query.casefold() in item["name"].casefold() and (kind == "all" or (kind == "image" and item["kind"] != "video") or item["kind"] == kind) and self._matches_filters(item, filters)]
+            items = [self._public_item(item) for item in job["items"] if query.casefold() in item["name"].casefold() and (kind == "all" or (kind == "image" and item["kind"] != "video") or item["kind"] == kind) and self._matches_filters(item, filters)]
             if stack:
                 items = [item for item in self._group_stacks(items) if item.get("stack_cover")]
             else:
@@ -339,7 +511,7 @@ class Api:
             job = self.jobs.get(job_id)
             if not job:
                 raise ValueError("浏览任务已失效")
-            items = [dict(item) for item in job["items"]]
+            items = [self._public_item(item) for item in job["items"]]
         ordered = self._group_stacks(items)
         return [item for item in ordered if item.get("stack_id") == stack_id]
 
@@ -375,7 +547,7 @@ class Api:
         if not actual.is_file() or actual.suffix.lower() not in config.IMAGES | config.VIDEOS:
             raise ValueError("不是受支持的媒体文件")
         stat = actual.stat()
-        return {"path": str(actual), "ext": actual.suffix.lower(), "signature": f"{stat.st_mtime_ns}:{stat.st_size}"}
+        return {"path": str(actual), "ext": actual.suffix.lower(), "signature": cache.signature(stat)}
 
     def photo_metadata(self, paths):
         authorized = [str(self.authorize(path)) for path in paths]
@@ -483,18 +655,7 @@ class Api:
 
     @staticmethod
     def _validate_entry_name(name):
-        if not isinstance(name, str) or not name or not name.strip():
-            raise ValueError("名称不能为空")
-        if name in {".", ".."} or "/" in name or "\\" in name:
-            raise ValueError("名称只能包含当前目录中的单个文件名")
-        if any(ord(char) < 32 or char in '<>:"|?*' for char in name):
-            raise ValueError("名称包含 Windows 不允许的字符")
-        if name[-1] in {".", " "}:
-            raise ValueError("名称不能以空格或句点结尾")
-        stem = name.split(".", 1)[0].upper()
-        if stem in {"CON", "PRN", "AUX", "NUL"} or stem.startswith(("COM", "LPT")) and stem[3:].isdigit() and 1 <= int(stem[3:]) <= 9:
-            raise ValueError("名称是 Windows 保留名称")
-        return name
+        return platform_support.validate_entry_name(name)
 
     @staticmethod
     def _clear_file_cache(path):
@@ -532,12 +693,18 @@ class Api:
             raise FileExistsError("目标名称已经存在")
         old_path, new_path = str(actual), str(destination)
         was_directory = actual.is_dir()
+        was_root = self._is_root(old_path)
+        old_identity = self.store.identity(old_path) if was_directory else None
         actual.rename(destination)
         if was_directory:
-            self.store.rename_prefix(old_path, new_path)
+            if not was_root:
+                new_identity = self.store.identity(new_path)
+                if old_identity and new_identity and old_identity[0] == new_identity[0]:
+                    self.store.rename_prefix(old_identity[0], old_identity[1], new_identity[1])
             self.state["roots"] = [self._renamed_path(root, old_path, new_path) for root in self.state["roots"]]
             self.state["expanded"] = sorted({self._renamed_path(folder, old_path, new_path) for folder in self.state.get("expanded", [])})
             self.state["current"] = self._renamed_path(self.state.get("current", ""), old_path, new_path)
+            self._sync_store_roots()
             self.settings({})
         else:
             self.store.move_path(old_path, new_path)
@@ -569,9 +736,9 @@ class Api:
     def file_action(self, path, action, confirmed=False):
         actual = self.authorize(path)
         if action == "reveal":
-            subprocess.Popen(["explorer.exe", "/select,", str(actual)])
+            platform_support.reveal_path(actual)
         elif action == "open":
-            os.startfile(str(actual))
+            platform_support.open_path(actual)
         elif action == "trash":
             if not confirmed or not actual.is_file():
                 raise ValueError("删除文件需要确认")
@@ -579,48 +746,19 @@ class Api:
             send2trash(str(actual))
             self.store.remove_path(str(actual))
         elif action == "copy":
-            import ctypes
-            from ctypes import wintypes
-            user, kernel = ctypes.windll.user32, ctypes.windll.kernel32
-            kernel.GlobalAlloc.restype = wintypes.HGLOBAL
-            kernel.GlobalLock.argtypes = [wintypes.HGLOBAL]
-            kernel.GlobalLock.restype = ctypes.c_void_p
-            kernel.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
-            kernel.GlobalFree.argtypes = [wintypes.HGLOBAL]
-            user.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
-            user.SetClipboardData.restype = wintypes.HANDLE
-            value = (str(actual) + "\0").encode("utf-16-le")
-            handle = kernel.GlobalAlloc(0x0042, len(value))
-            if not handle:
-                raise OSError("无法分配剪贴板内存")
-            pointer = kernel.GlobalLock(handle)
-            if not pointer:
-                kernel.GlobalFree(handle)
-                raise OSError("无法锁定剪贴板内存")
-            ctypes.memmove(pointer, value, len(value))
-            kernel.GlobalUnlock(handle)
-            if not user.OpenClipboard(None):
-                kernel.GlobalFree(handle)
-                raise OSError("剪贴板被占用，请重试")
-            try:
-                user.EmptyClipboard()
-                if not user.SetClipboardData(13, handle):
-                    kernel.GlobalFree(handle)
-                    raise OSError("无法写入剪贴板")
-            finally:
-                user.CloseClipboard()
+            platform_support.copy_text(str(actual))
         else:
             raise ValueError("未知操作")
         return {"ok": True}
 
     def _rejected_in_folder(self, folder, recursive):
-        folder_norm = os.path.normcase(os.path.abspath(str(folder)))
+        folder_key = platform_support.path_key(str(folder))
         results = []
         for candidate in self.store.rejected_paths():
             actual = Path(candidate)
             if not path_contains(str(folder), str(actual)):
                 continue
-            if not recursive and os.path.normcase(os.path.abspath(str(actual.parent))) != folder_norm:
+            if not recursive and platform_support.path_key(str(actual.parent)) != folder_key:
                 continue
             results.append(actual)
         return results
@@ -648,54 +786,8 @@ class Api:
         return {"count": count}
 
     def detect_editors(self):
-        """Detect installed photo editors (Photoshop / Lightroom) on Windows."""
-        editors = [{"id": "default", "name": "系统默认程序", "exe": None, "available": True}]
-        if os.name != "nt":
-            return editors
-        try:
-            import winreg
-        except ImportError:
-            return editors
-
-        def app_path(exe_name):
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + exe_name) as key:
-                    return winreg.QueryValueEx(key, None)[0]
-            except OSError:
-                return None
-
-        for editor_id, name, exe_name in (("photoshop", "Adobe Photoshop", "Photoshop.exe"), ("lightroom", "Lightroom Classic", "lightroom.exe")):
-            exe = app_path(exe_name)
-            if not exe and editor_id == "photoshop":
-                exe = self._adobe_install(r"SOFTWARE\Adobe\Photoshop", "ApplicationPath", "Photoshop.exe")
-            if not exe and editor_id == "lightroom":
-                exe = self._adobe_install(r"SOFTWARE\Adobe\Adobe Lightroom", "InstallDir", "lightroom.exe")
-            editors.append({"id": editor_id, "name": name, "exe": exe, "available": bool(exe and Path(exe).is_file())})
-        return editors
-
-    @staticmethod
-    def _adobe_install(root, value_name, exe_name):
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as key:
-                index = 0
-                while True:
-                    try:
-                        subkey = winreg.EnumKey(key, index)
-                    except OSError:
-                        break
-                    index += 1
-                    try:
-                        with winreg.OpenKey(key, subkey) as child:
-                            value, _ = winreg.QueryValueEx(child, value_name)
-                        candidate = Path(value) / exe_name
-                        if candidate.is_file():
-                            return str(candidate)
-                    except OSError:
-                        continue
-        except OSError:
-            pass
-        return None
+        """Detect installed photo editors (Photoshop / Lightroom) on this platform."""
+        return platform_support.detect_editors()
 
     def _resolve_editor_exe(self, editor_id):
         if editor_id == "default":
@@ -708,6 +800,11 @@ class Api:
             return configured["exe"], configured.get("name", "外部编辑器")
         raise ValueError("未找到该编辑器，请到设置中配置外部编辑器")
 
+    @staticmethod
+    def _is_editor_program(path):
+        candidate = Path(path)
+        return candidate.is_file() or (platform_support.IS_MACOS and candidate.is_dir())
+
     def open_external(self, paths, editor_id="default"):
         actuals = [str(self.authorize(path)) for path in paths]
         if not actuals:
@@ -717,12 +814,11 @@ class Api:
                 raise ValueError("只能打开受支持的媒体文件")
         exe, name = self._resolve_editor_exe(editor_id)
         if exe is None:
-            for path in actuals:
-                os.startfile(path)
+            platform_support.open_defaults(actuals)
         else:
-            if not Path(exe).is_file():
+            if not self._is_editor_program(exe):
                 raise ValueError(f"未找到程序：{exe}")
-            subprocess.Popen([str(Path(exe)), *actuals])
+            platform_support.open_with_editor(exe, actuals)
         result = {"ok": True, "editor": name, "opened": len(actuals)}
         if editor_id == "lightroom":
             result["capability"] = "limited"
@@ -772,7 +868,7 @@ class Api:
             finally:
                 if open_folder_after and target_path.is_dir():
                     try:
-                        os.startfile(str(target_path))
+                        platform_support.open_path(target_path)
                     except OSError:
                         pass
         threading.Thread(target=worker, daemon=True).start()
@@ -825,7 +921,7 @@ class Api:
         for source in sources:
             path = Path(source)
             for candidate in Api._companion_candidates(path):
-                key = os.path.normcase(os.path.abspath(str(candidate)))
+                key = platform_support.path_key(str(candidate))
                 if key not in seen:
                     seen.add(key)
                     ordered.append(str(candidate))
@@ -838,7 +934,7 @@ class Api:
             return
         for ext in config.IMAGES:
             candidate = path.with_suffix(ext)
-            if candidate.is_file() and os.path.normcase(str(candidate)) != os.path.normcase(str(path)):
+            if candidate.is_file() and not platform_support.same_path(str(candidate), str(path)):
                 yield candidate
 
     @staticmethod
@@ -900,14 +996,19 @@ class Api:
             raise ValueError("请先检查更新")
         import sys
         if not getattr(sys, "frozen", False):
-            raise ValueError("源码运行模式不能原地更新，请使用打包后的 Haven.exe")
+            raise ValueError("源码运行模式不能原地更新，请使用打包后的 Haven")
         if self.download_status["state"] == "downloading":
             return self.download_status
         self.download_status = {"state": "downloading", "progress": 0}
         def worker():
-            import updater
             try:
-                updater.install(self.update, lambda progress: self.download_status.update(progress=progress))
+                progress = lambda value: self.download_status.update(progress=value)
+                if platform_support.IS_MACOS:
+                    import updater_macos
+                    updater_macos.install(self.update, progress)
+                else:
+                    import updater
+                    updater.install(self.update, progress)
                 self.download_status.update(state="restarting")
                 if self.window:
                     self.window.destroy()

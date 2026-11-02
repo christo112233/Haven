@@ -1,4 +1,4 @@
-name: Windows Release
+name: Release
 on:
   push:
     tags: ['v*']
@@ -6,7 +6,8 @@ on:
 permissions:
   contents: write
 jobs:
-  build:
+  windows:
+    name: Windows x64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,13 +25,63 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Haven-win64
+          path: dist/Haven-win64.zip
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - name: Build Haven.app and release zip
+        env:
+          PYTHON: python
+        run: ./scripts/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haven-mac-arm64
+          path: dist/Haven-mac-arm64.zip
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Haven-win64
+          path: dist/win
+      - uses: actions/download-artifact@v4
+        with:
+          name: Haven-mac-arm64
+          path: dist/mac
+      - name: Collect artifacts and write combined manifest
+        run: |
+          mkdir -p dist
+          cp dist/win/*.zip dist/
+          cp dist/mac/*.zip dist/
+          python scripts/release_manifest.py '${{ github.ref_name }}'
+          cat dist/update.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haven-release
           path: |
             dist/Haven-win64.zip
+            dist/Haven-mac-arm64.zip
             dist/update.json
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           generate_release_notes: true
           files: |
             dist/Haven-win64.zip
+            dist/Haven-mac-arm64.zip
             dist/update.json

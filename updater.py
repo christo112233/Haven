@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -28,6 +29,43 @@ def validate_manifest(data, current):
     return data
 
 
+def platform_key():
+    """Manifest platform key for the running build."""
+    if config.IS_MACOS:
+        return "macos-arm64"
+    if config.IS_WINDOWS:
+        return "windows-x64"
+    return sys.platform
+
+
+def select_update(data, current, platform=None):
+    """Pick the release artifact for this platform.
+
+    New manifests carry a ``platforms`` map; Windows-only manifests from older
+    releases still expose the artifact at the top level and are accepted only on
+    Windows so a macOS build can never install a Windows ZIP.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("更新清单无效")
+    version = data.get("version")
+    if not isinstance(version, str) or Version(version) <= Version(current):
+        raise ValueError("更新版本必须高于当前版本")
+    platform = platform or platform_key()
+    platforms = data.get("platforms")
+    entry = platforms.get(platform) if isinstance(platforms, dict) else None
+    if entry is None and platform == "windows-x64" and data.get("url"):
+        entry = {"url": data.get("url"), "sha256": data.get("sha256"), "size": data.get("size")}
+    if not isinstance(entry, dict):
+        return None
+    selected = {
+        "version": version,
+        "notes": data.get("notes", ""),
+        "mandatory": bool(data.get("mandatory", False)),
+        **{key: entry.get(key) for key in ("url", "sha256", "size")},
+    }
+    return validate_manifest(selected, current)
+
+
 def request(url):
     response = urlopen(Request(url, headers={"User-Agent": f"Haven/{config.VERSION}"}), timeout=8)
     if urlparse(response.url).scheme != "https":
@@ -45,7 +83,10 @@ def check(current):
             data = json.loads(raw)
         if Version(data["version"]) <= Version(current):
             return {"available": False}
-        return {"available": True, "manifest": validate_manifest(data, current)}
+        selected = select_update(data, current)
+        if selected is None:
+            return {"available": False}
+        return {"available": True, "manifest": selected}
     except Exception as exc:
         return {"available": False, "error": f"暂时无法检查更新：{exc}"}
 
