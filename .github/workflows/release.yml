@@ -36,15 +36,18 @@ jobs:
         with:
           python-version: '3.14'
       - run: python -m pip install -r requirements.txt
+      - run: python -m pip install -r requirements-build.txt
       - run: python -m unittest discover -s tests -v
-      - name: Build Haven.app and release zip
+      - name: Build Haven.app, release zip and installer dmg
         env:
           PYTHON: python
         run: ./scripts/build_macos.sh
       - uses: actions/upload-artifact@v4
         with:
           name: Haven-mac-arm64
-          path: dist/Haven-mac-arm64.zip
+          path: |
+            dist/Haven-mac-arm64.zip
+            dist/Haven-mac-arm64.dmg
 
   release:
     name: Publish release
@@ -69,6 +72,7 @@ jobs:
           mkdir -p dist
           cp dist/win/*.zip dist/
           cp dist/mac/*.zip dist/
+          cp dist/mac/*.dmg dist/
           python scripts/release_manifest.py '${{ github.ref_name }}'
           cat dist/update.json
       - uses: actions/upload-artifact@v4
@@ -77,6 +81,7 @@ jobs:
           path: |
             dist/Haven-win64.zip
             dist/Haven-mac-arm64.zip
+            dist/Haven-mac-arm64.dmg
             dist/update.json
       - uses: softprops/action-gh-release@v2
         with:
@@ -84,4 +89,5 @@ jobs:
           files: |
             dist/Haven-win64.zip
             dist/Haven-mac-arm64.zip
+            dist/Haven-mac-arm64.dmg
             dist/update.json

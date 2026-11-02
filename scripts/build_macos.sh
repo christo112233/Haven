@@ -29,3 +29,13 @@ rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "Built $APP ($ARCHS)"
 echo "Release zip: $ZIP"
+
+DMG="dist/Haven-mac-arm64.dmg"
+if "$PYTHON" -c "import dmgbuild" >/dev/null 2>&1; then
+  rm -f "$DMG"
+  "$PYTHON" scripts/build_dmg.py --app "$APP" --output "$DMG" --version "$(cat version.txt)"
+  /usr/bin/hdiutil verify "$DMG" >/dev/null
+  echo "Installer dmg: $DMG"
+else
+  echo "dmgbuild 未安装，跳过 DMG；安装：$PYTHON -m pip install -r requirements-build.txt" >&2
+fi

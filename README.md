@@ -87,8 +87,8 @@ Haven 不是把几千张原图一次性塞进内存，而是：
 
 macOS 版目前只提供 **arm64（Apple Silicon）** 构建，最低 macOS 11。发布包没有 Apple 开发者签名与公证，因此首次打开需要手动放行：
 
-1. 从 [Releases](https://github.com/christo112233/Haven/releases/latest) 下载 `Haven-mac-arm64.zip`，解压得到 `Haven.app`。
-2. 把 `Haven.app` 拖进「应用程序」文件夹。
+1. 从 [Releases](https://github.com/christo112233/Haven/releases/latest) 下载 `Haven-mac-arm64.dmg`。
+2. 双击打开 DMG，在弹出的安装窗口中把 `Haven.app` 拖到「Applications（应用程序）」快捷方式上，然后推出磁盘映像。
 3. 首次打开时若提示"无法验证开发者"：在 **系统设置 → 隐私与安全性** 中点「仍要打开」；也可以右键 `Haven.app` → 打开。
 4. 如果系统提示"已损坏"，在终端执行一次：
 
@@ -96,6 +96,7 @@ macOS 版目前只提供 **arm64（Apple Silicon）** 构建，最低 macOS 11�
    xattr -dr com.apple.quarantine /Applications/Haven.app
    ```
 
+> 同一 Release 里也提供 `Haven-mac-arm64.zip`，解压后拖入「应用程序」效果相同；应用内自动更新使用 zip 包。
 > 更新时 Haven 会自动下载、校验并替换旧版本（成功后自动重启，并在下次启动时清理旧版本与安装包）。请把 `Haven.app` 放在可写位置（通常是「应用程序」）；从「下载」目录或只读的 DMG 里直接运行时会拒绝更新，并提示你先移动应用。由于没有 Apple 开发者签名/公证，更新后 macOS 可能重新询问照片目录的访问权限。
 > Intel Mac 暂不支持（RAW 解码依赖目前只提供 arm64 wheel）。
 
