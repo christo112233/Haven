@@ -24,9 +24,7 @@ class LibraryIdentityTests(unittest.TestCase):
         self.root.mkdir()
         self.library_dir = Path(self.temp.name) / "library"
         self.info = library.ensure_library(self.library_dir)
-
-    def tearDown(self):
-        self.temp.cleanup()
+        self.addCleanup(self.temp.cleanup)
 
     def photo(self, name):
         path = self.root / name
@@ -190,9 +188,7 @@ class CachePortabilityTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-
-    def tearDown(self):
-        self.temp.cleanup()
+        self.addCleanup(self.temp.cleanup)
 
     def test_signature_is_whole_second_and_size(self):
         class Stat:
@@ -237,9 +233,7 @@ class ApiLibraryIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name) / "photos"
         self.root.mkdir()
         (self.root / "a.jpg").write_bytes(b"x")
-
-    def tearDown(self):
-        self.temp.cleanup()
+        self.addCleanup(self.temp.cleanup)
 
     def test_api_creates_root_marker_and_persists_annotations_across_restart(self):
         try:

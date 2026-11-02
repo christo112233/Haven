@@ -177,8 +177,7 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(Path(transferred["parent"]), trip)
                 self.assertTrue((trip / "renamed.jpg").is_file())
             finally:
-                api.pool.shutdown()
-                api.raw_pool.shutdown()
+                api.close()
 
     def test_nested_folder_is_folded_into_its_parent_root(self):
         self.photo("photos/trip/day1/a.jpg")
@@ -202,11 +201,9 @@ class CoreTests(unittest.TestCase):
                     # Adding the parent of an existing root folds the old root into it.
                     self.assertEqual(reloaded.add_folder(str(self.root))["roots"], [str(self.root)])
                 finally:
-                    reloaded.pool.shutdown()
-                    reloaded.raw_pool.shutdown()
+                    reloaded.close()
             finally:
-                api.pool.shutdown()
-                api.raw_pool.shutdown()
+                api.close()
 
     def test_desktop_window_actions(self):
         with patch("config.STATE_PATH", self.root / "settings.json"):
@@ -237,8 +234,7 @@ class CoreTests(unittest.TestCase):
                 api.resize_window(100, 200)
                 api.window.resize.assert_called_once_with(800, 560)
             finally:
-                api.pool.shutdown()
-                api.raw_pool.shutdown()
+                api.close()
 
     def test_thumbnails_orientation_and_invalidation(self):
         path = self.root / "portrait.jpg"
@@ -335,8 +331,7 @@ class CoreTests(unittest.TestCase):
                 with Image.open(BytesIO(preview)) as image:
                     self.assertLessEqual(max(image.size), 2560)
             finally:
-                api.pool.shutdown()
-                api.raw_pool.shutdown()
+                api.close()
 
     def test_local_server_auth_range_and_path_boundary(self):
         path = self.photo()
@@ -376,8 +371,7 @@ class CoreTests(unittest.TestCase):
             finally:
                 service.shutdown()
                 service.server_close()
-                api.pool.shutdown()
-                api.raw_pool.shutdown()
+                api.close()
 
     def test_update_validation_and_zip_traversal(self):
         good = {"version": "0.2.0", "url": config.RELEASES + "/download/v0.2.0/Haven-win64.zip", "size": 100, "sha256": "a" * 64}
@@ -494,7 +488,7 @@ class CoreTests(unittest.TestCase):
                 self.assertTrue(first.is_file())
                 self.assertTrue(second.is_file())
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_export_move_updates_store_and_clears_cache(self):
         photo = self.photo("move.jpg")
@@ -513,7 +507,7 @@ class CoreTests(unittest.TestCase):
                 self.assertTrue((target / "move.jpg").is_file())
                 self.assertFalse((self.root / ".Haven" / "thumbs" / "move.jpg.webp").is_file())
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_export_target_validation(self):
         photo = self.photo("target.jpg")
@@ -530,7 +524,7 @@ class CoreTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     api.export_photos([str(photo)], str(self.root / "export"), {"collision": "bad"})
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_open_external_launches_editor_with_paths(self):
         photo = self.photo("open.jpg")
@@ -548,7 +542,7 @@ class CoreTests(unittest.TestCase):
                     api.open_external([str(photo)], "custom")
                     editor.assert_called_once_with(str(dummy), [str(photo)])
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_windows_window_action_branch(self):
         with patch("config.STATE_PATH", self.root / "settings.json"), patch("platform_support.IS_MACOS", False):
@@ -562,7 +556,7 @@ class CoreTests(unittest.TestCase):
                 self.assertFalse(api._maximized)
                 api.window.restore.assert_called_once()
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_detect_editors_returns_platform_entries(self):
         with patch("config.STATE_PATH", self.root / "settings.json"):
@@ -575,7 +569,7 @@ class CoreTests(unittest.TestCase):
                 self.assertIn("lightroom", ids)
                 self.assertTrue(all("name" in editor and "available" in editor for editor in editors))
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_session_and_export_mode_settings(self):
         with patch("config.STATE_PATH", self.root / "settings.json"):
@@ -591,7 +585,7 @@ class CoreTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     api.settings({"session": "not-a-dict"})
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
 
     def test_trash_rejected_and_count(self):
@@ -610,13 +604,14 @@ class CoreTests(unittest.TestCase):
                     api.trash_rejected(str(self.root))
                 with patch("api.send2trash") as trash:
                     result = api.trash_rejected(str(self.root), confirmed=True)
-                    trash.assert_called_once_with(os.path.normcase(str(rejected)))
+                    self.assertEqual(len(trash.call_args_list), 1)
+                    self.assertEqual(os.path.normcase(trash.call_args[0][0]), os.path.normcase(str(rejected)))
                 self.assertEqual(result["count"], 1)
                 self.assertEqual(api.count_rejected(str(self.root), True)["count"], 1)
                 self.assertTrue(keep.is_file())
                 self.assertTrue(sub.is_file())
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
 
     def test_burst_stacking_grouping(self):
@@ -649,7 +644,7 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(by_name["b1.jpg"]["stack_members"], [str(self.root / n) for n in ["b1.jpg", "b2.jpg", "b3.jpg"]])
                 self.assertEqual(by_name["star2.jpg"]["stack_id"], by_name["star1.jpg"]["stack_id"])
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_page_stack_and_stack_items(self):
         t0 = 1_700_000_000.0
@@ -674,7 +669,7 @@ class CoreTests(unittest.TestCase):
                 members = api.stack_items("job1", burst["stack_id"])
                 self.assertEqual([m["name"] for m in members], ["a.jpg", "b.jpg"])
             finally:
-                api.pool.shutdown(); api.raw_pool.shutdown()
+                api.close()
 
     def test_raw_metadata_extraction(self):
         from unittest.mock import MagicMock

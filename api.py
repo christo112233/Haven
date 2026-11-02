@@ -226,6 +226,15 @@ class Api:
             raise ValueError("未知窗口操作")
         return {"ok": True}
 
+    def close(self):
+        """Release the SQLite connections and worker pools (used on shutdown)."""
+        try:
+            self.store.close()
+        except Exception:
+            pass
+        self.pool.shutdown(wait=False, cancel_futures=True)
+        self.raw_pool.shutdown(wait=False, cancel_futures=True)
+
     def menu_state(self, selection=0, viewer=False, path="", sidebar=True):
         try:
             count = max(0, int(selection))
