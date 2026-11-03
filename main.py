@@ -7,6 +7,7 @@ import time
 
 from api import Api
 import config
+import i18n
 import platform_support
 from server import start, METHODS
 from updater import cleanup_completed_updates
@@ -94,7 +95,7 @@ def main():
             time.sleep(.1)
         else:
             print(f"Native folder drop setup failed: {last_error or 'sidebar unavailable'}", flush=True)
-            api.emit("error", {"message": f"无法启用文件夹拖放: {last_error or '侧边栏未加载'}"})
+            api.emit("error", {"message": i18n.tr("main.drop-failed", error=last_error or i18n.tr("main.sidebar-not-ready"))})
         def auto_check():
             time.sleep(5)
             if api.state.get("auto_update", True):

@@ -1,0 +1,10 @@
+{
+  "server.unauthorized": "Unauthorized",
+  "server.api-missing": "Unknown API method",
+  "server.request-too-large": "Request too large",
+  "server.unknown-media-mode": "Unknown media mode",
+  "server.motion-unsupported": "The file has no supported Motion Photo video",
+  "error.invalid-language": "Unsupported language",
+  "main.drop-failed": "Could not enable folder drag and drop: {error}",
+  "main.sidebar-not-ready": "the sidebar did not load"
+}

@@ -8,6 +8,7 @@ version = (root / "version.txt").read_text(encoding="utf-8").strip()
 
 datas = [
     (str(root / "web"), "web"),
+    (str(root / "locales"), "locales"),
     (str(root / "version.txt"), "."),
     (str(root / "logo.icns"), "."),
     (str(root / "THIRD_PARTY_NOTICES.md"), "."),

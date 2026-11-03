@@ -7,10 +7,11 @@ import threading
 from urllib.parse import urlparse, parse_qs
 
 import config
+import i18n
 import thumbs
 import metadata
 
-METHODS = {"bootstrap", "settings", "window_action", "drag_window", "menu_state", "resize_window", "add_folder", "remove_folder", "folders", "search_folders", "pick_folder", "open_folder", "open_smart_album", "page", "stack_items", "clean_cache", "create_folder", "rename", "move_file", "file_action", "photo_metadata", "update_photo_metadata", "list_tags", "list_smart_albums", "create_smart_album", "update_smart_album", "delete_smart_album", "detect_editors", "open_external", "export_photos", "export_progress", "count_rejected", "trash_rejected", "check_update", "install_update", "update_progress", "release_history", "library_info", "set_library_dir"}
+METHODS = {"bootstrap", "settings", "set_language", "window_action", "drag_window", "menu_state", "resize_window", "add_folder", "remove_folder", "folders", "search_folders", "pick_folder", "open_folder", "open_smart_album", "page", "stack_items", "clean_cache", "create_folder", "rename", "move_file", "file_action", "photo_metadata", "update_photo_metadata", "list_tags", "list_smart_albums", "create_smart_album", "update_smart_album", "delete_smart_album", "detect_editors", "open_external", "export_photos", "export_progress", "count_rejected", "trash_rejected", "check_update", "install_update", "update_progress", "release_history", "library_info", "set_library_dir"}
 
 
 def start(api, port=0):
@@ -43,15 +44,15 @@ def start(api, port=0):
         def do_POST(self):
             try:
                 if not self.authenticated() or self.headers.get("X-Haven-Token") != token:
-                    self.send_json({"error": "未授权"}, 403)
+                    self.send_json({"error": i18n.tr("server.unauthorized")}, 403)
                     return
                 method = self.path.removeprefix("/api/")
                 if not self.path.startswith("/api/") or method not in METHODS:
-                    self.send_json({"error": "API 不存在"}, 404)
+                    self.send_json({"error": i18n.tr("server.api-missing")}, 404)
                     return
                 size = int(self.headers.get("Content-Length", 0))
                 if size > 65536:
-                    raise ValueError("请求过大")
+                    raise ValueError(i18n.tr("server.request-too-large"))
                 arguments = json.loads(self.rfile.read(size) or b"[]")
                 self.send_json({"result": getattr(api, method)(*arguments)})
             except Exception as exc:
@@ -62,7 +63,7 @@ def start(api, port=0):
                 parsed = urlparse(self.path)
                 query = parse_qs(parsed.query)
                 if not self.authenticated() or query.get("token", [""])[0] != token:
-                    self.send_json({"error": "未授权"}, 403)
+                    self.send_json({"error": i18n.tr("server.unauthorized")}, 403)
                     return
                 if parsed.path == "/media":
                     path = query.get("path", [""])[0]
@@ -71,7 +72,7 @@ def start(api, port=0):
                     if mode == "motion":
                         offset = metadata.read(item["path"], item["ext"]).get("motion_offset", 0)
                         if not offset:
-                            raise ValueError("文件不包含支持的 Motion Photo 视频")
+                            raise ValueError(i18n.tr("server.motion-unsupported"))
                         original = Path(item["path"])
                         self.stream_file(original, original.stat().st_size - offset, "video/mp4")
                         return
@@ -79,7 +80,7 @@ def start(api, port=0):
                         self.stream_file(Path(item["path"]))
                         return
                     if mode not in {"thumb", "preview"}:
-                        raise ValueError("未知媒体模式")
+                        raise ValueError(i18n.tr("server.unknown-media-mode"))
                     body, warning = thumbs.get(item, mode == "preview")
                     self.headers_for("image/jpeg" if mode == "preview" else "image/webp", len(body))
                     self.wfile.write(body)
@@ -90,7 +91,12 @@ def start(api, port=0):
                 file.relative_to(root)
                 body = file.read_bytes()
                 if name == "index.html":
+                    # The UI must render in the same language as the backend and
+                    # without a round trip, so the catalog is injected directly.
                     body = body.replace(b"__HAVEN_TOKEN__", token.encode())
+                    payload = json.dumps(i18n.payload(), ensure_ascii=False).replace("</", "<\\/")
+                    body = body.replace(b"__HAVEN_I18N__", payload.encode("utf-8"))
+                    body = body.replace(b"__HAVEN_LANG__", i18n.current().encode("ascii"))
                 self.headers_for(mimetypes.guess_type(str(file))[0] or "application/octet-stream", len(body))
                 self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError):

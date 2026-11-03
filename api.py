@@ -9,6 +9,7 @@ import uuid
 from send2trash import send2trash
 import cache
 import config
+import i18n
 import library
 import metadata
 import metadata_store
@@ -46,6 +47,11 @@ class Api:
         self.state.setdefault("glass_transparency", 0.24)
         self.state.setdefault("library_dir", "")
         self.state.setdefault("root_ids", {})
+        # Device-local UI language ("system", "zh-CN" or "en-US"); never synced
+        # through the shared annotation library because it is a machine/use
+        # preference rather than photo data.
+        self.state.setdefault("language", i18n.SYSTEM)
+        i18n.configure(self.state["language"])
         # Older states could store a folder and its own subfolder as separate roots.
         if self._merge_roots():
             try:
@@ -155,8 +161,29 @@ class Api:
             "base_url": self.base_url,
             "desktop": self.window is not None,
             "platform": platform,
+            "locale": i18n.current(),
+            "language": self.state.get("language", i18n.SYSTEM),
             "library": self._library_payload(),
         }
+
+    def set_language(self, language):
+        """Switch the UI language immediately (the page is reloaded by the UI)."""
+        if language not in (*i18n.SUPPORTED, i18n.SYSTEM):
+            raise ValueError(i18n.tr("error.invalid-language"))
+        with self.lock:
+            self.state["language"] = language
+            try:
+                cache.atomic_json(config.STATE_PATH, self.state)
+            except OSError:
+                pass
+            i18n.configure(language)
+        if config.IS_MACOS and self.window is not None:
+            try:
+                import macos_menu
+                macos_menu.refresh(self.window, self)
+            except Exception:
+                pass
+        return {"language": self.state["language"], "locale": i18n.current(), "reload": True}
 
     def library_info(self):
         return self._library_payload()

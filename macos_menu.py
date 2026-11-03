@@ -6,6 +6,9 @@ AppKit. It is installed after the window has loaded (on the main thread) and
 talks to the web UI through ``haven:menu`` events; anything that blocks (file
 dialogs, clipboard calls) runs on a worker thread so the menu action never
 freezes the AppKit run loop.
+
+Titles come from the shared ``i18n`` catalog, so switching the UI language
+rebuilds the menu through :func:`refresh` without restarting the app.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import AppKit
 from AppKit import NSMenu, NSMenuItem, NSObject
 
 import config
+import i18n
 from PyObjCTools import AppHelper
 
 _INSTALLED = []
@@ -29,6 +33,11 @@ CONTROL = AppKit.NSControlKeyMask
 
 def install(window, api):
     """Install the native menu after the window exists (macOS only)."""
+    return refresh(window, api)
+
+
+def refresh(window, api):
+    """Rebuild the menu with the current catalog (used on language change)."""
     if not config.IS_MACOS or window is None:
         return False
 
@@ -80,6 +89,7 @@ class _Menu(NSObject):
     def install(self):
         NSApp = self.app
         main = NSMenu.alloc().init()
+        tr = i18n.tr
 
         # Application menu
         app_item = NSMenuItem.alloc().init()
@@ -88,71 +98,71 @@ class _Menu(NSObject):
         app_item.setSubmenu_(app_menu)
         main.addItem_(app_item)
 
-        _item(app_menu, "关于 Haven", "showAbout:", target=self)
+        _item(app_menu, tr("menu.about"), "showAbout:", target=self)
         app_menu.addItem_(NSMenuItem.separatorItem())
-        _item(app_menu, "设置…", "handleMenu:", key=",", target=self, represented="settings")
-        _item(app_menu, "检查更新…", "handleMenu:", target=self, represented="updates")
+        _item(app_menu, tr("menu.settings"), "handleMenu:", key=",", target=self, represented="settings")
+        _item(app_menu, tr("menu.check-updates"), "handleMenu:", target=self, represented="updates")
         app_menu.addItem_(NSMenuItem.separatorItem())
         services = NSMenu.alloc().init()
-        services.setTitle_("服务")
+        services.setTitle_(tr("menu.services"))
         NSApp.setServicesMenu_(services)
         services_item = NSMenuItem.alloc().init()
-        services_item.setTitle_("服务")
+        services_item.setTitle_(tr("menu.services"))
         services_item.setSubmenu_(services)
         app_menu.addItem_(services_item)
         app_menu.addItem_(NSMenuItem.separatorItem())
-        _item(app_menu, "隐藏 Haven", "hide:", key="h")
-        _item(app_menu, "隐藏其他", "hideOtherApplications:", key="h", mask=COMMAND | OPTION)
-        _item(app_menu, "全部显示", "unhideAllApplications:")
+        _item(app_menu, tr("menu.hide"), "hide:", key="h")
+        _item(app_menu, tr("menu.hide-others"), "hideOtherApplications:", key="h", mask=COMMAND | OPTION)
+        _item(app_menu, tr("menu.show-all"), "unhideAllApplications:")
         app_menu.addItem_(NSMenuItem.separatorItem())
-        _item(app_menu, "退出 Haven", "handleMenu:", key="q", target=self, represented="quit")
+        _item(app_menu, tr("menu.quit"), "handleMenu:", key="q", target=self, represented="quit")
 
         # File menu
-        file_menu = self._submenu(main, "文件")
-        _item(file_menu, "添加文件夹…", "handleMenu:", key="o", target=self, represented="add-folder")
-        _item(file_menu, "重新扫描当前目录", "handleMenu:", key="r", target=self, represented="rescan")
+        file_menu = self._submenu(main, tr("menu.file"))
+        _item(file_menu, tr("menu.add-folder"), "handleMenu:", key="o", target=self, represented="add-folder")
+        _item(file_menu, tr("menu.rescan"), "handleMenu:", key="r", target=self, represented="rescan")
         file_menu.addItem_(NSMenuItem.separatorItem())
-        _item(file_menu, "关闭窗口", "performClose:", key="w")
+        _item(file_menu, tr("menu.close-window"), "performClose:", key="w")
 
         # Edit menu (standard responder-chain actions + copy path)
-        edit_menu = self._submenu(main, "编辑")
-        _item(edit_menu, "撤销", "undo:", key="z")
-        _item(edit_menu, "重做", "redo:", key="z", mask=COMMAND | SHIFT)
+        edit_menu = self._submenu(main, tr("menu.edit"))
+        _item(edit_menu, tr("menu.undo"), "undo:", key="z")
+        _item(edit_menu, tr("menu.redo"), "redo:", key="z", mask=COMMAND | SHIFT)
         edit_menu.addItem_(NSMenuItem.separatorItem())
-        _item(edit_menu, "剪切", "cut:", key="x")
-        _item(edit_menu, "复制", "copy:", key="c")
-        _item(edit_menu, "粘贴", "paste:", key="v")
-        _item(edit_menu, "全选", "selectAll:", key="a")
+        _item(edit_menu, tr("menu.cut"), "cut:", key="x")
+        _item(edit_menu, tr("menu.copy"), "copy:", key="c")
+        _item(edit_menu, tr("menu.paste"), "paste:", key="v")
+        _item(edit_menu, tr("menu.select-all"), "selectAll:", key="a")
         edit_menu.addItem_(NSMenuItem.separatorItem())
-        _item(edit_menu, "复制文件路径", "handleMenu:", key="c", mask=COMMAND | SHIFT, target=self, represented="copy-path")
+        _item(edit_menu, tr("menu.copy-path"), "handleMenu:", key="c", mask=COMMAND | SHIFT, target=self, represented="copy-path")
 
         # View menu
-        view_menu = self._submenu(main, "显示")
-        self.sidebar_item = _item(view_menu, "显示/隐藏侧边栏", "handleMenu:", key="s", mask=COMMAND | OPTION, target=self, represented="sidebar")
+        view_menu = self._submenu(main, tr("menu.view"))
+        self.sidebar_item = _item(view_menu, tr("menu.toggle-sidebar"), "handleMenu:", key="s", mask=COMMAND | OPTION, target=self, represented="sidebar")
         view_menu.addItem_(NSMenuItem.separatorItem())
         appearance_item = NSMenuItem.alloc().init()
-        appearance_item.setTitle_("外观")
+        appearance_item.setTitle_(tr("menu.appearance"))
         self.appearance_menu = NSMenu.alloc().init()
-        self.appearance_menu.setTitle_("外观")
+        self.appearance_menu.setTitle_(tr("menu.appearance"))
         self.appearance_menu.setDelegate_(self)
         appearance_item.setSubmenu_(self.appearance_menu)
         view_menu.addItem_(appearance_item)
-        for value, title in (("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")):
-            _item(self.appearance_menu, title, "handleMenu:", target=self, represented=f"theme-{value}")
+        for value, key in (("system", "menu.appearance-system"), ("light", "menu.appearance-light"), ("dark", "menu.appearance-dark")):
+            _item(self.appearance_menu, tr(key), "handleMenu:", target=self, represented=f"theme-{value}")
         view_menu.addItem_(NSMenuItem.separatorItem())
-        _item(view_menu, "进入全屏", "toggleFullScreen:", key="f", mask=COMMAND | CONTROL)
+        _item(view_menu, tr("menu.enter-full-screen"), "toggleFullScreen:", key="f", mask=COMMAND | CONTROL)
 
         # Window menu (standard macOS conventions)
-        window_menu = self._submenu(main, "窗口")
-        _item(window_menu, "最小化", "performMiniaturize:", key="m")
-        _item(window_menu, "缩放", "performZoom:")
+        window_menu = self._submenu(main, tr("menu.window"))
+        _item(window_menu, tr("menu.minimize"), "performMiniaturize:", key="m")
+        _item(window_menu, tr("menu.zoom"), "performZoom:")
         window_menu.addItem_(NSMenuItem.separatorItem())
-        _item(window_menu, "前置全部窗口", "arrangeInFront:", target=NSApp)
+        _item(window_menu, tr("menu.bring-all-front"), "arrangeInFront:", target=NSApp)
 
         # Help menu
-        help_menu = self._submenu(main, "帮助")
-        _item(help_menu, "Haven 开源仓库", "handleMenu:", target=self, represented="repository")
-        _item(help_menu, "快捷键说明", "handleMenu:", target=self, represented="shortcuts")
+        help_menu = self._submenu(main, tr("menu.help"))
+        _item(help_menu, tr("menu.repository"), "handleMenu:", target=self, represented="repository")
+        _item(help_menu, tr("menu.shortcuts"), "handleMenu:", target=self, represented="shortcuts")
 
         NSApp.setMainMenu_(main)
         self.menu = main
@@ -249,7 +259,7 @@ class _Menu(NSObject):
         try:
             result = self.api.add_folder()
         except Exception as exc:
-            self._toast(f"添加文件夹失败：{exc}")
+            self._toast(i18n.tr("menu.add-folder-failed", error=exc))
             return
         if result and not result.get("cancelled") and result.get("roots"):
             self.api.emit("folder-added", result)
@@ -258,9 +268,9 @@ class _Menu(NSObject):
     def _copy_path(self, path):
         try:
             self.api.file_action(path, "copy")
-            self._toast("已复制文件路径")
+            self._toast(i18n.tr("menu.path-copied"))
         except Exception as exc:
-            self._toast(f"复制失败：{exc}")
+            self._toast(i18n.tr("menu.copy-failed", error=exc))
 
     @objc.python_method
     def _quit(self):

@@ -1,0 +1,10 @@
+{
+  "server.unauthorized": "未授权",
+  "server.api-missing": "API 不存在",
+  "server.request-too-large": "请求过大",
+  "server.unknown-media-mode": "未知媒体模式",
+  "server.motion-unsupported": "文件不包含支持的 Motion Photo 视频",
+  "error.invalid-language": "不支持的语言",
+  "main.drop-failed": "无法启用文件夹拖放：{error}",
+  "main.sidebar-not-ready": "侧边栏未加载"
+}

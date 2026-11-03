@@ -9,6 +9,8 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
+# Bilingual message catalogs shared by the Python backend and the web UI.
+LOCALES_DIR = RESOURCE_DIR / "locales"
 # macOS apps live in a sealed, often read-only bundle: user data belongs in
 # Application Support. Windows keeps the portable beside-the-exe layout.
 # HAVEN_DATA_DIR overrides the location (portable run, tests, sandboxes).
