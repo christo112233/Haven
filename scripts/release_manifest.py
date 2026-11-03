@@ -67,13 +67,19 @@ macos = platform_entry(MACOS_ZIP)
 platforms = {"windows-x64": windows}
 if macos is not None:
     platforms["macos-arm64"] = macos
+# Release notes are shown inside the update dialog. ``notes`` stays a plain
+# string for already-installed clients (which concatenate nothing) and carries
+# both languages, while ``notesI18n`` lets current clients pick one.
+note_zh = "Haven 本地照片与视频管理工具。Windows 支持应用内更新；macOS 请解压后替换 Haven.app。更新详情请参阅 GitHub Releases。"
+note_en = "Haven is a local photo and video manager. Windows supports in-app updates; on macOS, unzip and replace Haven.app. See GitHub Releases for details."
 manifest = {
     "version": VERSION,
     "url": windows["url"],
     "sha256": windows["sha256"],
     "size": windows["size"],
     "mandatory": False,
-    "notes": "Haven 本地照片与视频管理工具。Windows 支持应用内更新；macOS 请解压后替换 Haven.app。更新详情请参阅 GitHub Releases。",
+    "notes": f"{note_zh}\n\n{note_en}",
+    "notesI18n": {"zh-CN": note_zh, "en-US": note_en},
     "platforms": platforms,
 }
 (root / "dist" / "update.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

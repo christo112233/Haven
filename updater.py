@@ -12,20 +12,21 @@ from urllib.request import Request, urlopen
 from packaging.version import Version
 import config
 import cache
+import i18n
 
 
 def validate_manifest(data, current):
     if not isinstance(data, dict) or Version(data["version"]) <= Version(current):
-        raise ValueError("更新版本必须高于当前版本")
+        raise ValueError(i18n.tr("backend.error.update-version"))
     parsed = urlparse(data["url"])
     prefix = f"/{config.REPOSITORY}/releases/download/"
     if parsed.scheme != "https" or parsed.netloc != "github.com" or not parsed.path.startswith(prefix):
-        raise ValueError("更新地址必须来自 Haven 的 HTTPS GitHub Releases")
+        raise ValueError(i18n.tr("backend.error.update-url"))
     if not re.fullmatch(r"[a-fA-F0-9]{64}", data.get("sha256", "")):
-        raise ValueError("缺少有效的 SHA256 校验值")
+        raise ValueError(i18n.tr("backend.error.update-sha"))
     size = data.get("size")
     if not isinstance(size, int) or isinstance(size, bool) or not 0 < size <= 2 * 1024**3:
-        raise ValueError("更新大小不合法")
+        raise ValueError(i18n.tr("backend.error.update-size"))
     return data
 
 
@@ -46,10 +47,10 @@ def select_update(data, current, platform=None):
     Windows so a macOS build can never install a Windows ZIP.
     """
     if not isinstance(data, dict):
-        raise ValueError("更新清单无效")
+        raise ValueError(i18n.tr("backend.error.update-manifest"))
     version = data.get("version")
     if not isinstance(version, str) or Version(version) <= Version(current):
-        raise ValueError("更新版本必须高于当前版本")
+        raise ValueError(i18n.tr("backend.error.update-version"))
     platform = platform or platform_key()
     platforms = data.get("platforms")
     entry = platforms.get(platform) if isinstance(platforms, dict) else None
@@ -70,7 +71,7 @@ def request(url):
     response = urlopen(Request(url, headers={"User-Agent": f"Haven/{config.VERSION}"}), timeout=8)
     if urlparse(response.url).scheme != "https":
         response.close()
-        raise ValueError("更新请求不能重定向到非 HTTPS 地址")
+        raise ValueError(i18n.tr("backend.error.update-redirect"))
     return response
 
 
@@ -79,7 +80,7 @@ def check(current):
         with request(config.MANIFEST_URL) as response:
             raw = response.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
-                raise ValueError("更新清单过大")
+                raise ValueError(i18n.tr("backend.error.update-manifest-too-large"))
             data = json.loads(raw)
         if Version(data["version"]) <= Version(current):
             return {"available": False}
@@ -88,7 +89,7 @@ def check(current):
             return {"available": False}
         return {"available": True, "manifest": selected}
     except Exception as exc:
-        return {"available": False, "error": f"暂时无法检查更新：{exc}"}
+        return {"available": False, "error": i18n.tr("backend.error.update-check", error=exc)}
 
 
 def download(manifest, destination, progress):
@@ -100,12 +101,12 @@ def download(manifest, destination, progress):
             while block := response.read(256 * 1024):
                 received += len(block)
                 if received > manifest["size"]:
-                    raise ValueError("下载文件超过清单中的大小")
+                    raise ValueError(i18n.tr("backend.error.update-download-size"))
                 stream.write(block)
                 digest.update(block)
                 progress(min(99, round(received / manifest["size"] * 100)))
         if received != manifest["size"] or digest.hexdigest().lower() != manifest["sha256"].lower():
-            raise ValueError("更新文件 SHA256 或大小校验失败")
+            raise ValueError(i18n.tr("backend.error.update-checksum"))
         progress(100)
     except Exception:
         Path(destination).unlink(missing_ok=True)
@@ -115,7 +116,7 @@ def download(manifest, destination, progress):
 def install(manifest, progress):
     helper = config.APP_DIR / "updater.exe"
     if not helper.is_file():
-        raise FileNotFoundError("独立更新器 updater.exe 缺失")
+        raise FileNotFoundError(i18n.tr("backend.error.updater-missing"))
     staging = config.APP_DIR / ".updates"
     staging.mkdir(exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="haven-", dir=staging))
@@ -124,7 +125,8 @@ def install(manifest, progress):
     copied_helper = work / "updater.exe"
     shutil.copy2(helper, copied_helper)
     plan = work / "plan.json"
-    cache.atomic_json(plan, {"target": str(config.APP_DIR), "package": str(package), "pid": os.getpid(), "current": config.VERSION, "manifest": manifest})
+    # ``language`` lets the standalone updater localise its own messages.
+    cache.atomic_json(plan, {"target": str(config.APP_DIR), "package": str(package), "pid": os.getpid(), "current": config.VERSION, "manifest": manifest, "language": i18n.current()})
     subprocess.Popen([str(copied_helper), "--plan", str(plan)], cwd=work, creationflags=subprocess.CREATE_NO_WINDOW)
 
 

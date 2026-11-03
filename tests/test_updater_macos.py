@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import config
+import i18n
 import updater
 import updater_macos
 
@@ -80,11 +81,15 @@ class PlatformSelectionTests(unittest.TestCase):
 
 class BundleTests(unittest.TestCase):
     def setUp(self):
+        # Pin the language so the assertions below test the Chinese catalog
+        # instead of whatever language the host machine happens to use.
+        i18n.configure("zh-CN")
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
 
     def tearDown(self):
         self.temp.cleanup()
+        i18n.configure(i18n.SYSTEM)
 
     def fake_bundle(self, version="9.9.9", identifier=updater_macos.BUNDLE_IDENTIFIER):
         bundle = self.root / "Haven.app"

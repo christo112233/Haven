@@ -4,6 +4,7 @@ import os
 import threading
 from PIL import Image, ImageOps
 import cache
+import i18n
 from config import RAW, VIDEOS
 import heic_handler
 import raw_handler
@@ -46,5 +47,5 @@ def get(item, preview=False):
             cache.atomic_bytes(target, data)
             cache.atomic_json(signature_path, expected)
         except OSError as exc:
-            warning = f"缓存不可写，仅使用内存预览：{path.parent} ({exc})"
+            warning = i18n.tr("backend.warning.preview-cache-readonly", path=path.parent, error=exc)
         return data, warning

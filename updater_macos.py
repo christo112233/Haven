@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 import config
+import i18n
 import updater
 
 BUNDLE_IDENTIFIER = "io.github.christo112233.haven"
@@ -31,16 +32,16 @@ def bundle_from_executable(executable):
     """Return the .app bundle containing ``executable`` (when frozen)."""
     executable = Path(executable).resolve()
     if len(executable.parents) < 3:
-        raise ValueError("无法定位 Haven.app")
+        raise ValueError(i18n.tr("backend.error.update-macos-bundle-locate"))
     bundle = executable.parents[2]
     if bundle.suffix != ".app" or not (bundle / "Contents" / "Info.plist").is_file():
-        raise ValueError("只有在 Haven.app 中运行才能使用应用内更新")
+        raise ValueError(i18n.tr("backend.error.update-macos-bundle-only"))
     return bundle
 
 
 def app_bundle():
     if not getattr(sys, "frozen", False):
-        raise ValueError("源码运行模式不能应用内更新，请使用打包后的 Haven.app")
+        raise ValueError(i18n.tr("backend.error.update-macos-source"))
     return bundle_from_executable(sys.executable)
 
 
@@ -80,19 +81,19 @@ def check_environment(bundle, manifest):
     bundle = Path(bundle)
     text = str(bundle)
     if "AppTranslocation" in text:
-        raise ValueError("Haven 正在从只读的临时位置运行。请先把 Haven.app 拖到“应用程序”文件夹再更新。")
+        raise ValueError(i18n.tr("backend.error.update-macos-translocation"))
     parent = bundle.parent
     if not os.access(parent, os.W_OK):
-        raise ValueError(f"没有写入权限，无法更新 {bundle.name}。请把 Haven.app 拖到“应用程序”文件夹后重试。")
+        raise ValueError(i18n.tr("backend.error.update-macos-parent-write", name=bundle.name))
     if not os.access(bundle, os.W_OK):
-        raise ValueError("Haven.app 当前不可写，请检查文件夹权限。")
+        raise ValueError(i18n.tr("backend.error.update-macos-bundle-write"))
     try:
         free = shutil.disk_usage(parent).free
     except OSError:
         free = 0
     required = int(manifest.get("size", 0)) * 3 + 300 * 1024**2
     if free and free < required:
-        raise ValueError(f"磁盘空间不足，更新至少需要 {required // 1024**2} MB 可用空间。")
+        raise ValueError(i18n.tr("backend.error.update-macos-disk", size=required // 1024**2))
     return bundle
 
 
@@ -100,15 +101,15 @@ def verify_bundle(app, manifest):
     """Verify the downloaded bundle before it replaces the running one."""
     app = Path(app)
     if not app.is_dir() or not (app / "Contents" / "Info.plist").is_file():
-        raise ValueError("更新包中缺少 Haven.app")
+        raise ValueError(i18n.tr("backend.error.update-macos-missing-app"))
     info = _info_plist(app)
     if info.get("CFBundleIdentifier") != BUNDLE_IDENTIFIER:
-        raise ValueError("更新包的 Bundle ID 不匹配")
+        raise ValueError(i18n.tr("backend.error.update-macos-bundle-id"))
     if str(info.get("CFBundleShortVersionString", "")) != str(manifest.get("version", "")):
-        raise ValueError("更新包版本与清单不符")
+        raise ValueError(i18n.tr("backend.error.update-macos-version"))
     result = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
     if result.returncode != 0:
-        raise ValueError(f"更新包代码签名校验失败：{(result.stderr or result.stdout).strip()[:200]}")
+        raise ValueError(i18n.tr("backend.error.update-macos-signature", error=(result.stderr or result.stdout).strip()[:200]))
     return info
 
 
@@ -121,6 +122,7 @@ def _helper_script(work, bundle, staged, backup, manifest, open_command=None):
     version = manifest["version"]
     old_version = config.VERSION
     q = shlex.quote
+    install_failed = i18n.tr("backend.error.update-macos-install-failed") + "\n"
     lines = [
         "#!/bin/sh",
         "set -u",
@@ -145,7 +147,7 @@ def _helper_script(work, bundle, staged, backup, manifest, open_command=None):
         '  echo "copy failed; restoring backup"',
         '  rm -rf "$TARGET"',
         '  [ -e "$BACKUP" ] && mv "$BACKUP" "$TARGET"',
-        '  printf "更新失败：无法写入 Haven.app，已恢复原版本。\\n" > "$ERROR"',
+        f'  printf %s {q(install_failed)} > "$ERROR"',
         '  "$OPEN" -n "$TARGET" >/dev/null 2>&1',
         '  exit 1',
         'fi',
@@ -171,10 +173,10 @@ def install(manifest, progress):
         stage.mkdir()
         result = subprocess.run(["/usr/bin/ditto", "-x", "-k", str(package), str(stage)], capture_output=True, text=True)
         if result.returncode != 0:
-            raise ValueError(f"解压更新包失败：{(result.stderr or result.stdout).strip()[:200]}")
+            raise ValueError(i18n.tr("backend.error.update-macos-unzip", error=(result.stderr or result.stdout).strip()[:200]))
         staged = stage / "Haven.app"
         if staged.is_symlink():
-            raise ValueError("更新包中的 Haven.app 不能是符号链接")
+            raise ValueError(i18n.tr("backend.error.update-macos-symlink"))
         verify_bundle(staged, manifest)
         backup = bundle.parent / f"{BACKUP_PREFIX}{config.VERSION}"
         script = _helper_script(work, bundle, staged, backup, manifest)

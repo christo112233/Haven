@@ -84,7 +84,7 @@ class Api:
         try:
             info = library.ensure_library(directory)
         except OSError as exc:
-            self.library_warning = f"图库数据目录不可用，已临时使用本机目录：{exc}"
+            self.library_warning = i18n.tr("backend.warning.library-dir-unavailable", error=exc)
             directory = data_dir / "library"
             info = library.ensure_library(directory)
         self.library_dir = directory
@@ -95,7 +95,7 @@ class Api:
         try:
             library.adopt_database(legacy_db, db_path)
         except Exception as exc:  # noqa: BLE001 - surface any copy failure as a warning
-            self.library_warning = self.library_warning or f"旧版本地标注数据库迁移失败：{exc}"
+            self.library_warning = self.library_warning or i18n.tr("backend.warning.library-migrate-failed", error=exc)
         self.store = metadata_store.MetadataStore(
             db_path,
             roots=self.state["roots"],
@@ -105,7 +105,7 @@ class Api:
         if self.store.migration_report:
             report = self.store.migration_report
             if report.get("unmatched"):
-                self.library_warning = self.library_warning or f"迁移完成，但有 {report['unmatched']} 条旧标注无法匹配当前照片目录"
+                self.library_warning = self.library_warning or i18n.tr("backend.warning.library-unmatched", count=report["unmatched"])
         try:
             library.maybe_backup(db_path, directory)
         except OSError:
@@ -230,12 +230,12 @@ class Api:
         try:
             cache.atomic_json(config.STATE_PATH, self.state)
         except OSError as exc:
-            return {"warning": f"图库位置已切换，但设置无法保存：{exc}", **self._library_payload()}
+            return {"warning": i18n.tr("backend.warning.library-settings-save", error=exc), **self._library_payload()}
         return self._library_payload()
 
     def window_action(self, action):
         if self.window is None:
-            raise ValueError("窗口操作仅适用于桌面程序")
+            raise ValueError(i18n.tr("backend.error.window-action-desktop"))
         if action == "minimize":
             self.window.minimize()
         elif action == "maximize":
@@ -250,7 +250,7 @@ class Api:
         elif action == "close":
             self.window.destroy()
         else:
-            raise ValueError("未知窗口操作")
+            raise ValueError(i18n.tr("backend.error.window-action-unknown"))
         return {"ok": True}
 
     def close(self):
@@ -283,29 +283,29 @@ class Api:
 
     def resize_window(self, width, height):
         if self.window is None:
-            raise ValueError("窗口缩放仅适用于桌面程序")
+            raise ValueError(i18n.tr("backend.error.window-resize-desktop"))
         self.window.resize(max(800, min(3840, int(width))), max(560, min(2160, int(height))))
         return {"ok": True}
 
     def settings(self, changes):
         allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency", "external_editor", "export_folder", "export_mode", "session", "stack", "stack_base_gap", "stack_factor"}
         if "export_mode" in changes and changes.get("export_mode") not in {"copy", "move"}:
-            raise ValueError("导出模式无效")
+            raise ValueError(i18n.tr("backend.error.export-mode"))
         if "session" in changes and changes.get("session") is not None and not isinstance(changes.get("session"), dict):
-            raise ValueError("选片会话数据无效")
+            raise ValueError(i18n.tr("backend.error.culling-session"))
         for key in ("stack_base_gap", "stack_factor"):
             if key in changes:
                 try:
                     if float(changes[key]) <= 0:
-                        raise ValueError("堆叠阈值必须是正数")
+                        raise ValueError(i18n.tr("backend.error.stack-threshold"))
                 except (TypeError, ValueError):
-                    raise ValueError("堆叠阈值必须是正数")
+                    raise ValueError(i18n.tr("backend.error.stack-threshold"))
         with self.lock:
             self.state.update({key: value for key, value in changes.items() if key in allowed})
             try:
                 cache.atomic_json(config.STATE_PATH, self.state)
             except OSError as exc:
-                return {"warning": f"设置无法保存到程序目录：{exc}"}
+                return {"warning": i18n.tr("backend.warning.settings-save", error=exc)}
         return {"ok": True}
 
     def authorize(self, value):
@@ -316,7 +316,7 @@ class Api:
                 return path
             except ValueError:
                 continue
-        raise PermissionError("路径不在已添加的照片目录内")
+        raise PermissionError(i18n.tr("backend.error.path-not-in-library"))
 
     def add_folder(self, path=None):
         if not path:
@@ -329,7 +329,7 @@ class Api:
             path = selected[0]
         folder = Path(path).resolve(strict=True)
         if not folder.is_dir():
-            raise ValueError("请选择文件夹")
+            raise ValueError(i18n.tr("backend.error.choose-folder"))
         with self.lock:
             # A folder inside an already added folder is part of that tree, not a second root.
             if not any(path_contains(root, str(folder)) for root in self.state["roots"]):
@@ -403,7 +403,7 @@ class Api:
 
     def search_folders(self, query):
         if not isinstance(query, str):
-            raise ValueError("搜索内容无效")
+            raise ValueError(i18n.tr("backend.error.search-query"))
         query = query.strip()
         if not query:
             return {"items": [], "truncated": False}
@@ -411,7 +411,7 @@ class Api:
 
     def pick_folder(self):
         if self.window is None:
-            raise ValueError("文件夹选择仅适用于桌面程序")
+            raise ValueError(i18n.tr("backend.error.folder-picker-desktop"))
         import webview
         selected = self.window.create_file_dialog(webview.FileDialog.FOLDER)
         return {"path": selected[0] if selected else None}
@@ -419,7 +419,7 @@ class Api:
     def open_folder(self, path, recursive=False):
         folder = self.authorize(path)
         if not folder.is_dir():
-            raise ValueError("文件夹不存在")
+            raise ValueError(i18n.tr("backend.error.folder-missing"))
         job_id = uuid.uuid4().hex
         job = {"id": job_id, "path": str(folder), "state": "scanning", "items": [], "done": 0, "total": 0, "warnings": [], "revision": 0}
         with self.lock:
@@ -474,7 +474,7 @@ class Api:
                     try:
                         cache.save(parent, records)
                     except OSError:
-                        job["warnings"].append(f"缓存不可写：{parent}，本次仅使用内存")
+                        job["warnings"].append(i18n.tr("backend.warning.cache-readonly", path=parent))
                 job["state"] = "ready"
             except Exception as exc:
                 job.update(state="error", error=str(exc))
@@ -483,7 +483,7 @@ class Api:
         with self.lock:
             job = self.jobs.get(job_id)
             if not job:
-                raise ValueError("浏览任务已失效")
+                raise ValueError(i18n.tr("backend.error.browse-job-expired"))
             filters = filters or {}
             items = [self._public_item(item) for item in job["items"] if query.casefold() in item["name"].casefold() and (kind == "all" or (kind == "image" and item["kind"] != "video") or item["kind"] == kind) and self._matches_filters(item, filters)]
             if stack:
@@ -546,7 +546,7 @@ class Api:
         with self.lock:
             job = self.jobs.get(job_id)
             if not job:
-                raise ValueError("浏览任务已失效")
+                raise ValueError(i18n.tr("backend.error.browse-job-expired"))
             items = [self._public_item(item) for item in job["items"]]
         ordered = self._group_stacks(items)
         return [item for item in ordered if item.get("stack_id") == stack_id]
@@ -581,7 +581,7 @@ class Api:
     def media_item(self, path):
         actual = self.authorize(path)
         if not actual.is_file() or actual.suffix.lower() not in config.IMAGES | config.VIDEOS:
-            raise ValueError("不是受支持的媒体文件")
+            raise ValueError(i18n.tr("backend.error.media-unsupported"))
         stat = actual.stat()
         return {"path": str(actual), "ext": actual.suffix.lower(), "signature": cache.signature(stat)}
 
@@ -708,25 +708,25 @@ class Api:
     def create_folder(self, parent, name):
         folder = self.authorize(parent)
         if not folder.is_dir():
-            raise ValueError("目标不是文件夹")
+            raise ValueError(i18n.tr("backend.error.target-not-folder"))
         if any(part.casefold() == cache.CACHE_NAME.casefold() for part in folder.parts):
-            raise PermissionError("不能在 Haven 缓存目录中创建文件夹")
+            raise PermissionError(i18n.tr("backend.error.create-in-cache"))
         target = folder / self._validate_entry_name(name)
         if target.exists():
-            raise FileExistsError("目标名称已经存在")
+            raise FileExistsError(i18n.tr("backend.error.name-exists"))
         target.mkdir()
         return {"path": str(target), "parent": str(folder), "name": target.name}
 
     def rename(self, path, name):
         actual = self.authorize(path)
         if actual.name.casefold() == cache.CACHE_NAME.casefold():
-            raise PermissionError("不能重命名 Haven 缓存目录")
+            raise PermissionError(i18n.tr("backend.error.rename-cache"))
         self._validate_entry_name(name)
         destination = actual.with_name(name)
         if destination == actual or destination.name.casefold() == actual.name.casefold():
             return {"path": str(actual), "name": actual.name, "old_path": str(actual), "roots": self.state["roots"], "expanded": self.state.get("expanded", []), "current": self.state.get("current", "")}
         if destination.exists():
-            raise FileExistsError("目标名称已经存在")
+            raise FileExistsError(i18n.tr("backend.error.name-exists"))
         old_path, new_path = str(actual), str(destination)
         was_directory = actual.is_dir()
         was_root = self._is_root(old_path)
@@ -753,16 +753,16 @@ class Api:
         source = self.authorize(path)
         folder = self.authorize(destination)
         if not source.is_file() or source.suffix.lower() not in config.IMAGES | config.VIDEOS:
-            raise ValueError("只能移动照片或视频文件")
+            raise ValueError(i18n.tr("backend.error.move-media-only"))
         if not folder.is_dir():
-            raise ValueError("目标不是文件夹")
+            raise ValueError(i18n.tr("backend.error.target-not-folder"))
         if any(part.casefold() == cache.CACHE_NAME.casefold() for part in folder.parts):
-            raise PermissionError("不能移动到 Haven 缓存目录")
+            raise PermissionError(i18n.tr("backend.error.move-to-cache"))
         target = folder / source.name
         if target == source:
             return {"path": str(source), "old_parent": str(source.parent), "parent": str(folder), "name": source.name}
         if target.exists():
-            raise FileExistsError("目标文件夹中已经存在同名文件")
+            raise FileExistsError(i18n.tr("backend.error.move-target-exists"))
         source_parent = source.parent
         source.rename(target)
         self.store.move_path(str(source), str(target))
@@ -777,14 +777,14 @@ class Api:
             platform_support.open_path(actual)
         elif action == "trash":
             if not confirmed or not actual.is_file():
-                raise ValueError("删除文件需要确认")
+                raise ValueError(i18n.tr("backend.error.delete-confirm"))
             self.media_item(actual)
             send2trash(str(actual))
             self.store.remove_path(str(actual))
         elif action == "copy":
             platform_support.copy_text(str(actual))
         else:
-            raise ValueError("未知操作")
+            raise ValueError(i18n.tr("backend.error.action-unknown"))
         return {"ok": True}
 
     def _rejected_in_folder(self, folder, recursive):
@@ -802,15 +802,15 @@ class Api:
     def count_rejected(self, path, recursive=False):
         folder = self.authorize(path)
         if not folder.is_dir():
-            raise ValueError("文件夹不存在")
+            raise ValueError(i18n.tr("backend.error.folder-missing"))
         return {"count": len(self._rejected_in_folder(folder, recursive))}
 
     def trash_rejected(self, path, recursive=False, confirmed=False):
         if not confirmed:
-            raise ValueError("移入回收站需要确认")
+            raise ValueError(i18n.tr("backend.error.trash-confirm"))
         folder = self.authorize(path)
         if not folder.is_dir():
-            raise ValueError("文件夹不存在")
+            raise ValueError(i18n.tr("backend.error.folder-missing"))
         count = 0
         for actual in self._rejected_in_folder(folder, recursive):
             if not actual.is_file():
@@ -827,14 +827,14 @@ class Api:
 
     def _resolve_editor_exe(self, editor_id):
         if editor_id == "default":
-            return None, "系统默认程序"
+            return None, i18n.tr("backend.editor.system-default")
         detected = {editor["id"]: editor for editor in self.detect_editors()}
         if editor_id in detected and detected[editor_id].get("available"):
             return detected[editor_id]["exe"], detected[editor_id]["name"]
         configured = self.state.get("external_editor")
         if isinstance(configured, dict) and configured.get("exe") and (configured.get("id") == editor_id or editor_id == "custom"):
-            return configured["exe"], configured.get("name", "外部编辑器")
-        raise ValueError("未找到该编辑器，请到设置中配置外部编辑器")
+            return configured["exe"], configured.get("name", i18n.tr("backend.editor.external"))
+        raise ValueError(i18n.tr("backend.error.editor-not-found"))
 
     @staticmethod
     def _is_editor_program(path):
@@ -844,49 +844,49 @@ class Api:
     def open_external(self, paths, editor_id="default"):
         actuals = [str(self.authorize(path)) for path in paths]
         if not actuals:
-            raise ValueError("没有要打开的照片")
+            raise ValueError(i18n.tr("backend.error.open-no-photos"))
         for path in actuals:
             if not Path(path).is_file() or Path(path).suffix.lower() not in config.IMAGES | config.VIDEOS:
-                raise ValueError("只能打开受支持的媒体文件")
+                raise ValueError(i18n.tr("backend.error.open-media-only"))
         exe, name = self._resolve_editor_exe(editor_id)
         if exe is None:
             platform_support.open_defaults(actuals)
         else:
             if not self._is_editor_program(exe):
-                raise ValueError(f"未找到程序：{exe}")
+                raise ValueError(i18n.tr("backend.error.program-not-found", path=exe))
             platform_support.open_with_editor(exe, actuals)
         result = {"ok": True, "editor": name, "opened": len(actuals)}
         if editor_id == "lightroom":
             result["capability"] = "limited"
-            result["hint"] = "Lightroom 批量打开能力有限，建议改用「导出到文件夹」"
+            result["hint"] = i18n.tr("backend.hint.lightroom-limited")
         return result
 
     @staticmethod
     def _validate_export_target(target):
         if not isinstance(target, str) or not target.strip():
-            raise ValueError("请选择导出文件夹")
+            raise ValueError(i18n.tr("backend.error.export-target-missing"))
         path = Path(target.strip())
         if path.exists() and not path.is_dir():
-            raise ValueError("导出目标不是文件夹")
+            raise ValueError(i18n.tr("backend.error.export-target-not-folder"))
         if any(part.casefold() == config.CACHE_NAME.casefold() for part in path.parts):
-            raise PermissionError("导出文件夹不能位于 Haven 缓存目录内")
+            raise PermissionError(i18n.tr("backend.error.export-target-cache"))
         return path
 
     def export_photos(self, paths, target, options=None):
         options = options or {}
         authorized = [str(self.authorize(path)) for path in paths]
         if not authorized:
-            raise ValueError("没有要导出的照片")
+            raise ValueError(i18n.tr("backend.error.export-no-photos"))
         for path in authorized:
             if not Path(path).is_file() or Path(path).suffix.lower() not in config.IMAGES | config.VIDEOS:
-                raise ValueError("只能导出受支持的媒体文件")
+                raise ValueError(i18n.tr("backend.error.export-media-only"))
         target_path = self._validate_export_target(target)
         mode = options.get("mode", self.state.get("export_mode", "copy"))
         if mode not in {"copy", "move"}:
-            raise ValueError("导出模式无效")
+            raise ValueError(i18n.tr("backend.error.export-mode"))
         collision = options.get("collision", "rename")
         if collision not in {"rename", "skip", "overwrite"}:
-            raise ValueError("同名处理方式无效")
+            raise ValueError(i18n.tr("backend.error.export-collision"))
         include_companions = bool(options.get("include_companions", False))
         preserve_structure = bool(options.get("preserve_structure", False))
         open_folder_after = bool(options.get("open_folder_after", False))
@@ -922,7 +922,7 @@ class Api:
             if destination.exists():
                 if collision == "skip":
                     job["skipped"] += 1
-                    job["errors"].append(f"跳过：{source_path.name} 目标已存在")
+                    job["errors"].append(i18n.tr("backend.error.export-skip", name=source_path.name))
                     self.emit("export-progress", self._export_snapshot(job))
                     continue
                 if collision == "rename":
@@ -1027,12 +1027,12 @@ class Api:
 
     def install_update(self, confirmed=False):
         if not confirmed:
-            raise ValueError("更新前需要确认已保存其他工作")
+            raise ValueError(i18n.tr("backend.error.update-confirm"))
         if not self.update:
-            raise ValueError("请先检查更新")
+            raise ValueError(i18n.tr("backend.error.update-check-first"))
         import sys
         if not getattr(sys, "frozen", False):
-            raise ValueError("源码运行模式不能原地更新，请使用打包后的 Haven")
+            raise ValueError(i18n.tr("backend.error.update-unfrozen"))
         if self.download_status["state"] == "downloading":
             return self.download_status
         self.download_status = {"state": "downloading", "progress": 0}

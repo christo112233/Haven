@@ -4,6 +4,7 @@ import subprocess
 import imageio_ffmpeg
 from PIL import Image
 
+import i18n
 import platform_support
 
 FLAGS = platform_support.subprocess_flags()
@@ -25,4 +26,4 @@ def frame(path):
         if result.returncode == 0 and result.stdout:
             with Image.open(BytesIO(result.stdout)) as image:
                 return image.copy()
-    raise ValueError("视频抽帧失败")
+    raise ValueError(i18n.tr("backend.error.video-frame-extract"))

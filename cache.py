@@ -7,6 +7,7 @@ import tempfile
 import time
 import uuid
 
+import i18n
 from config import CACHE_NAME, CACHE_VERSION
 
 # Absolute paths must never be persisted in the shared scan index: the same
@@ -85,11 +86,11 @@ def directory(folder, create=True):
                 if staging.exists():
                     shutil.rmtree(staging)
         if target.is_symlink() or (target.exists() and read_json(marker) != {"app": "Haven"}):
-            raise PermissionError(".Haven 已存在且不是 Haven 缓存，无法写入")
+            raise PermissionError(i18n.tr("backend.error.cache-not-haven"))
         for name in ("thumbs", "previews"):
             child = target / name
             if child.is_symlink():
-                raise PermissionError("缓存路径不能是符号链接")
+                raise PermissionError(i18n.tr("backend.error.cache-symlink"))
             child.mkdir(exist_ok=True)
         if os.name == "nt":
             attributes = ctypes.windll.kernel32.GetFileAttributesW(str(target))
@@ -116,5 +117,5 @@ def clean(folder):
     if not target.exists():
         return
     if target.is_symlink() or read_json(target / "owner.json") != {"app": "Haven"}:
-        raise PermissionError("拒绝清理非 Haven 创建的目录")
+        raise PermissionError(i18n.tr("backend.error.cache-clean-refused"))
     shutil.rmtree(target)

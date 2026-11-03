@@ -269,7 +269,7 @@ class CoreTests(unittest.TestCase):
         with patch("cache.directory", side_effect=readonly):
             data, warning = thumbs.get(item)
             self.assertTrue(data)
-            self.assertIn("内存", warning)
+            self.assertIn("read only", warning)
         self.assertFalse((self.root / ".Haven").exists())
         (self.root / ".Haven").mkdir()
         (self.root / ".Haven" / "personal.txt").write_text("do not delete")

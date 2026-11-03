@@ -109,6 +109,7 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; flex-shrink: 0; }
 .brand-dot { color: #aaf4fa; }
 .sidebar-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 13px; font-size: 12px; color: var(--muted); }
 .sidebar-heading button { width: 34px; height: 34px; }
+.sidebar-heading > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-search { display:flex; align-items:center; gap:8px; flex:0 0 34px; min-width:0; margin:0 5px 9px; padding:0 10px; border:1px solid var(--border); border-radius:8px; background:color-mix(in srgb, var(--glass-fill) 75%, transparent); }
 .folder-search:focus-within { border-color:var(--border-strong); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
 .folder-search svg { width:14px; height:14px; color:var(--muted); }
@@ -564,6 +565,9 @@ h2 { font-size: 20px; font-weight: 500; margin: 0; }
 .export-progress progress { flex: 1; height: 8px; }
 .export-progress span { font-size: 11px; color: var(--muted); white-space: nowrap; }
 @media (max-width: 760px) { .session-button span { display: none; } .session-button { padding: 0 13px; } }
+/* The culling banner carries several controls; let it wrap where the longer
+   English labels no longer fit on one line. */
+@media (max-width: 620px) { .session-banner { flex-wrap: wrap; row-gap: 6px; } .session-banner-info { flex-basis: 100%; } }
 
 .stack-badge { position: absolute; left: 9px; bottom: 9px; z-index: 3; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: #0f8a5fcc; border: 1px solid #c9ffea; color: #f2fff9; font-size: 11px; font-weight: 600; display: grid; place-items: center; box-shadow: 0 2px 9px #06201552; }
 .settings-row input[type="number"] { width: 96px; min-height: 36px; padding: 6px 10px; border-radius: 13px; border: 1px solid var(--border-strong); background: color-mix(in srgb, var(--glass-fill) 82%, transparent); color: var(--text); outline: 0; }

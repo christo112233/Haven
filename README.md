@@ -1,169 +1,231 @@
 # Haven
 
+**English** | [简体中文](README.zh-CN.md)
+
 <p align="center">
-  <img src="docs/logo.png" alt="Haven 图标" width="128">
+  <img src="docs/logo.png" alt="Haven icon" width="128">
 </p>
 
 <p align="center">
-  <strong>Windows / macOS 本地照片与视频管理工具</strong><br>
-  不上传，不导入，把散落在硬盘各处的照片收进一个顺滑入口。
+  <strong>A local photo and video manager for Windows and macOS</strong><br>
+  No uploads, no imports. One smooth home for the photos scattered across your drives.
 </p>
 
-> 你还在 C 盘、D 盘、下载文件夹、相机导出目录之间来回翻找照片吗？  
-> 你还在资源管理器里打开几百张照片，然后看着它转圈、卡死、未响应吗？  
-> **Haven 就是为这些瞬间准备的。**
+> Still digging through drive C:, drive D:, the Downloads folder and camera export folders for a photo?  
+> Still opening hundreds of images in Explorer or Finder and watching it spin, freeze and hang?  
+> **Haven is built for exactly those moments.**
 
-Haven 直接浏览电脑上的文件夹，不要求你把照片导入专用图库，也不会上传影像。它把不同磁盘、不同目录中的照片集中到一个快速、清爽的界面里，让你搜索、筛选、评分、打标签、看原图。界面支持深浅主题和毛玻璃效果，面板使用 CSS `backdrop-filter` 实现磨砂玻璃，不依赖 WebGL2。
-
----
-
-## 为什么是 Haven？
-
-- **散落各处的照片，统一入口浏览**  
-  添加多个照片目录，展开目录树，或搜索尚未展开的子文件夹。照片不必搬家，原图留在原处，Haven 帮你把它们找回来。
-
-- **数千张照片，依旧顺滑**  
-  照片网格只渲染当前屏幕附近的卡片，不会一次性把几千张缩略图全部画出来。扫描结果、缩略图和 RAW 等格式的预览会被缓存，大目录二次打开更快。
-
-- **不导入、不上传、不打扰原文件**  
-  原始影像保留在原目录。Haven 只在你需要时读取、预览和整理，适合希望保留文件夹结构的用户。
-
-- **像整理音乐一样整理照片**  
-  评分、标签、颜色标签、收藏、旗帜、Rejected 状态、智能相册，全都围绕你已有的目录工作。
+Haven browses folders on your computer directly. It never asks you to import photos into a proprietary library and never uploads your images. It gathers photos from different drives and folders into one fast, clean interface where you can search, filter, rate, tag and view originals. The interface includes light and dark themes and frosted-glass panels rendered with CSS `backdrop-filter`.
 
 ---
 
-## 性能：为大量照片而生
+## Why Haven?
 
-Haven 不是把几千张原图一次性塞进内存，而是：
+- **One place for photos scattered everywhere**  
+  Add multiple photo folders, expand the folder tree, or search subfolders you have not expanded yet. Your photos stay where they are; Haven helps you find them again.
 
-- **视口虚拟化**：照片网格只渲染当前屏幕附近的卡片，滚动时按需加载。
-- **多级缓存**：扫描索引、缩略图、RAW 预览都会被缓存，减少重复扫描和解码。
-- **按需读取原图**：浏览列表时不会把所有大图全部载入，查看照片时才读取原图。
-- **跨目录智能查找**：智能相册可组合筛选条件，在已添加的目录中跨文件夹查找照片。
+- **Thousands of photos, still smooth**  
+  The photo grid renders only the cards near the current viewport instead of drawing thousands of thumbnails at once. Scan results, thumbnails and RAW previews are cached, so reopening large folders is faster.
 
-所以，哪怕一个文件夹里有数千张照片，浏览、筛选、切换目录，也不用等到天荒地老。
+- **No imports, no uploads, no touching originals**  
+  Original images stay in their folders. Haven only reads, previews and organizes them when you need it, which suits users who want to keep their folder structure.
+
+- **Organize photos like a music library**  
+  Ratings, tags, color labels, favorites, flags, Rejected status and smart albums all work on top of the folders you already have.
 
 ---
 
-## 主要功能
+## Performance: built for large libraries
 
-- **按文件夹浏览**  
-  添加多个照片目录，展开目录树，或在侧边栏搜索尚未展开的子文件夹。照片列表上方会显示当前目录的直属子文件夹；侧边栏宽度可拖动调整。
+Haven does not load thousands of originals into memory at once:
 
-- **查找与整理**  
-  按文件名搜索；按格式、评分、标签、颜色标签、收藏、旗帜及 Rejected 状态筛选；按名称、日期、大小等排序。智能相册可以组合这些条件，跨已添加的目录查找照片。
+- **Viewport virtualization**: the photo grid renders only the cards near the current viewport and loads more as you scroll.
+- **Multi-level caching**: scan indexes, thumbnails and RAW previews are cached to avoid repeated scanning and decoding.
+- **Originals on demand**: browsing the list does not load every full-size image; the original is read only when you view a photo.
+- **Smart cross-folder search**: smart albums can combine filter conditions and search across folders inside the directories you have added.
 
-- **批量处理**  
-  进入选择模式后，可批量设置评分、标签、颜色标签和状态，也可以把选中的照片拖到侧边栏中的其他文件夹。
+So even when a single folder holds thousands of photos, browsing, filtering and switching folders stays responsive.
 
-- **全屏查看**  
-  查看照片详情，缩放、平移和旋转预览；在底部工具栏直接修改评分、收藏、旗帜、Rejected、标签和颜色标签。视频可在支持的编码下内嵌播放。
-
-- **本地缓存**  
-  扫描结果、缩略图和 RAW 等格式的预览会被缓存；照片网格只渲染当前屏幕附近的卡片。
-
-- **规范修图流程**  
-  拍完可立即选片，一键打开ps等软件，选片修图一站式
-
-  - **智能堆叠**  
-  可自动识别堆栈照片，自动合并不占地
 ---
 
-## 下载与安装
+## Main features
+
+- **Browse by folder**  
+  Add multiple photo folders, expand the folder tree, or search subfolders that have not been expanded yet from the sidebar. The immediate subfolders of the current folder are listed above the photo grid, and the sidebar width can be dragged to resize.
+
+- **Search and organize**  
+  Search by file name; filter by format, rating, tags, color labels, favorites, flags and Rejected status; sort by name, date, size and more. Smart albums can combine these conditions and search across the added folders.
+
+- **Batch actions**  
+  In select mode you can set ratings, tags, color labels and statuses for many photos at once, and drag selected photos onto other folders in the sidebar.
+
+- **Full-screen viewer**  
+  Inspect photo details and zoom, pan and rotate the preview; change ratings, favorites, flags, Rejected status, tags and color labels directly from the bottom toolbar. Videos play inline when the codec is supported.
+
+- **Local cache**  
+  Scan results, thumbnails and RAW previews are cached; the photo grid renders only the cards near the current viewport.
+
+- **Culling and editing workflow**  
+  Cull photos right after a shoot and open them in Photoshop or another editor in one click, so culling and editing form a single flow.
+
+  - **Smart stacks**  
+    Burst and stacked shots are detected and collapsed automatically without taking extra space.
+
+- **Interface language**  
+  In **Settings → Language** you can switch the interface between **Follow System**, **简体中文** (Simplified Chinese) and **English**. Unsupported system languages fall back to English. The language is a device-local preference and is not synced through a shared NAS library.
+
+---
+
+## Download and install
 
 ### Windows 10/11 x64
 
-需要 Microsoft Edge WebView2 Runtime。新版 Windows 通常已安装；缺失时可从 [Microsoft 官方页面](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
+Requires the Microsoft Edge WebView2 Runtime. Recent Windows versions usually include it; if it is missing, install it from the [Microsoft WebView2 page](https://developer.microsoft.com/microsoft-edge/webview2/).
 
-1. 从 [Releases](https://github.com/christo112233/Haven/releases/latest) 下载 `Haven-win64.zip`。
-2. 完整解压到有写入权限的位置，例如 `D:\Apps\Haven`。
-3. 运行 `Haven.exe`。
+1. Download `Haven-win64.zip` from [Releases](https://github.com/christo112233/Haven/releases/latest).
+2. Extract the whole archive to a writable location, for example `D:\Apps\Haven`.
+3. Run `Haven.exe`.
 
-> 请保留解压后的 `updater.exe`、`version.txt` 和 `_internal/`，不要单独移动主程序。  
-> 发布包已包含所需的 Python 运行环境。
+> Keep `updater.exe`, `version.txt` and `_internal/` next to the main program; do not move `Haven.exe` out on its own.  
+> The release package already includes the required Python runtime.
 
-### macOS（Apple Silicon）
+### macOS 11+ (Apple Silicon)
 
-macOS 版目前只提供 **arm64（Apple Silicon）** 构建，最低 macOS 11。发布包没有 Apple 开发者签名与公证，因此首次打开需要手动放行：
+The macOS build is currently **arm64 (Apple Silicon) only**, with macOS 11 as the minimum. The release is **ad-hoc signed and not notarized** (there is no Apple Developer ID), so the first launch needs manual approval:
 
-1. 从 [Releases](https://github.com/christo112233/Haven/releases/latest) 下载 `Haven-mac-arm64.dmg`。
-2. 双击打开 DMG，在弹出的安装窗口中把 `Haven.app` 拖到「Applications（应用程序）」快捷方式上，然后推出磁盘映像。
-3. 首次打开时若提示"无法验证开发者"：在 **系统设置 → 隐私与安全性** 中点「仍要打开」；也可以右键 `Haven.app` → 打开。
-4. 如果系统提示"已损坏"，在终端执行一次：
+1. Download `Haven-mac-arm64.dmg` from [Releases](https://github.com/christo112233/Haven/releases/latest).
+2. Open the DMG and drag `Haven.app` onto the Applications shortcut in the installer window, then eject the disk image.
+3. If the first launch reports that the developer cannot be verified, open **System Settings → Privacy & Security** and click **Open Anyway**; you can also right-click `Haven.app` → **Open**.
+4. If macOS reports that the app is damaged, clear the quarantine flag once in Terminal:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/Haven.app
    ```
 
-> 同一 Release 里也提供 `Haven-mac-arm64.zip`，解压后拖入「应用程序」效果相同；应用内自动更新使用 zip 包。
-> 更新时 Haven 会自动下载、校验并替换旧版本（成功后自动重启，并在下次启动时清理旧版本与安装包）。请把 `Haven.app` 放在可写位置（通常是「应用程序」）；从「下载」目录或只读的 DMG 里直接运行时会拒绝更新，并提示你先移动应用。由于没有 Apple 开发者签名/公证，更新后 macOS 可能重新询问照片目录的访问权限。
-> Intel Mac 暂不支持（RAW 解码依赖目前只提供 arm64 wheel）。
-
-macOS 菜单栏已接入原生能力：Haven 菜单（关于 / 设置 ⌘, / 检查更新 / 退出）、文件（添加文件夹 ⌘O / 重新扫描 ⌘R / 关闭窗口 ⌘W）、编辑（复制文件路径 ⌘⇧C）、显示（显示/隐藏侧边栏 ⌥⌘S、外观跟随系统/浅色/深色、全屏 ⌃⌘F）。
-
-源码运行、测试和构建方法见[开发文档](docs/开发文档.md)。
+> The same release also ships `Haven-mac-arm64.zip`; unzipping it and dragging the app into Applications works the same way. In-app updates use the zip package.  
+> During an update Haven downloads, verifies and replaces the old version automatically (it relaunches when done and removes the old bundle and downloaded package on the next successful launch). Keep `Haven.app` in a writable location (normally Applications); running it from the Downloads folder or a read-only DMG refuses to update and asks you to move the app first. Because the build is ad-hoc signed and not notarized, macOS may ask again for access to your photo folders after an update.  
+> Intel Macs are not supported (the RAW decoding dependency currently ships only an arm64 wheel).
 
 ---
 
-## 快速上手
+## Quick start
 
-1. 点击侧边栏「文件夹」旁的添加按钮选择目录，也可以把文件夹拖入侧边栏。
-2. 点击文件夹浏览其中的照片；勾选「包含子文件夹」可将下级目录中的影像一并列出。点击照片进入全屏预览。
-3. 用顶部搜索和筛选控件缩小结果范围；通过照片右键菜单或全屏工具栏设置评分与标签。点击选择按钮可一次处理多张照片。
-4. 点击开始选片，创建一个选片目录，把要修的照片放到一个统一的文件夹内
-### 全屏快捷键
+1. Click the add button next to **Folders** in the sidebar and choose a directory; you can also drag a folder into the sidebar.
+2. Click a folder to browse its photos; enable **Include Subfolders** to list images from nested folders as well. Click a photo to open the full-screen viewer.
+3. Use the search field and filter controls at the top to narrow the results; set ratings and tags from the photo context menu or the full-screen toolbar. Click the select button to work on several photos at once.
+4. Click **Start Culling** to create a culling session and collect the photos you plan to edit into one folder.
 
-| 按键 | 操作 |
+---
+
+## Keyboard shortcuts
+
+### macOS native menu
+
+| Shortcut | Action |
 | --- | --- |
-| `←` / `→` 或 `A` / `D` | 上一张 / 下一张 |
-| `Space` | 适应窗口 |
-| `F` | 展开或收起详情 |
-| `Esc` | 关闭预览 |
+| `⌘O` | Add folder |
+| `⌘R` | Rescan the current folder |
+| `⌘,` | Open Settings |
+| `⌥⌘S` | Show or hide the sidebar |
+| `⌃⌘F` | Toggle full screen |
+| `⌘⇧C` | Copy the current file path |
+| `⌘W` | Close the window |
+| `⌘Q` | Quit Haven |
 
-滚轮可缩放照片，拖动可平移。查看器中的旋转仅改变预览，不修改原文件。删除操作会先要求确认，然后将文件移入系统回收站。
+The native menu also provides the standard macOS Edit, Window and Help items (Undo/Redo, Cut/Copy/Paste, Select All, Minimize, Zoom, a link to the repository and the shortcut list), and the **View → Appearance** menu switches Follow System / Light / Dark. Switching the interface language rebuilds the native menu immediately.
 
----
+### Full-screen viewer
 
-## 格式与数据
+| Key | Action |
+| --- | --- |
+| `←` / `→` or `A` / `D` | Previous / next photo |
+| `Space` | Fit to window |
+| `F` | Show or hide details |
+| `Esc` | Close the viewer |
 
-Haven 识别常见图片（JPG、PNG、WebP、BMP、GIF、TIFF）、HEIC/HEIF、常见相机 RAW（如 CR2、CR3、NEF、ARW、DNG）及 MP4、MOV、MKV 等视频。RAW 的具体机型取决于 LibRaw；视频能否在窗口内播放取决于 WebView2 对容器和编码的支持，不支持时可交给系统默认程序打开。支持部分同名照片与视频配对的 Live Photo、Motion Photo。
-
-原始影像保留在原目录。缩略图、预览和扫描索引位于各照片目录下的 `.Haven/`，Windows 与 macOS 共用同一套缓存，换平台不用重新生成。
-
-评分、标签、收藏、旗帜、颜色标签及智能相册位于 **图库数据库** 中：
-
-- Windows：默认在程序目录的 `library/library.sqlite3`（沿用旧版的 `haven-metadata.sqlite3` 会自动迁移）；
-- macOS：`~/Library/Application Support/Haven/library/library.sqlite3`；
-- 可以在 **设置 → 图库数据位置** 把图库数据库放到 NAS 等共享目录。Windows 和 macOS 指向同一个目录后，两边的评分、标签和智能相册保持同步；照片根目录中的 `.Haven/library.json` 记录稳定的图库/根目录 ID；
-- 图库目录下的 `backups/` 会保留最近的数据快照；网络盘不可用时照片仍可浏览，标注暂不可用。
-
-文件夹和外观等设置位于：
-
-- Windows：程序目录的 `haven-settings.json`；
-- macOS：`~/Library/Application Support/Haven/haven-settings.json`。
-
-只读照片目录仍可浏览，但无法持久保存该目录的缓存或根目录 ID。移除一个图库根目录不会删除其照片、缓存或标注。
+The mouse wheel zooms the photo and dragging pans it. Rotation in the viewer only changes the preview and never modifies the original file. Deleting asks for confirmation first, then moves the file to the system Recycle Bin / Trash.
 
 ---
 
-## 联网与更新
+## Formats and data
 
-浏览和整理照片可离线进行。联网仅用于检查或下载 GitHub Releases 更新，以及主动打开更新历史。
+Haven recognizes common images (JPG, PNG, WebP, BMP, GIF, TIFF), HEIC/HEIF, common camera RAW formats (such as CR2, CR3, NEF, ARW and DNG), and videos such as MP4, MOV and MKV. Which RAW camera models work depends on LibRaw; whether a video plays inline depends on the WebView2 support for its container and codec, and unsupported files can still be opened with the system default application. Live Photo and Motion Photo pairs (a photo and a video with the same name) are partly supported.
 
-- Windows / macOS：都支持应用内自动更新，可在设置中关闭自动检查。更新包会做 HTTPS、SHA256、版本号和代码签名校验；替换失败会自动回滚。
-- macOS 的旧版本和下载缓存会在新版本首次成功启动后自动删除，不会长期占用磁盘；更新后如系统重新询问文件夹权限，按提示允许即可。
+Original images stay in their folders. Thumbnails, previews and the scan index live in the `.Haven/` directory inside each photo folder; Windows and macOS use the same cache, so switching platforms does not require regenerating it.
 
-建议将 Windows 版放在可写目录，以便保存设置和安装更新。
+Read-only photo folders can still be browsed, but caches and the root identity for that folder cannot be persisted there. Removing a library root does not delete its photos, cache or annotations.
 
 ---
 
-## 平台支持
+## Data and settings locations
 
-- Windows 10/11 x64：完整支持。
-- macOS 11+（Apple Silicon）：支持浏览、整理、选片、选片导出、共享图库；
-- 两个平台使用同一份代码与同一个版本号，发布时同时构建。
+| Location | Windows | macOS |
+| --- | --- | --- |
+| Settings `haven-settings.json` | Program folder | `~/Library/Application Support/Haven/haven-settings.json` |
+| Library database `library/library.sqlite3` | Program folder `library/` (can be changed to a shared folder in Settings) | `~/Library/Application Support/Haven/library/` (can be changed to a shared folder in Settings) |
+| Library marker and backups | `library.json` and `backups/` in the library folder | Same as on Windows |
+| Photo folder cache | `<photo folder>/.Haven/` (shared by both platforms) | Same as on Windows |
+| Update staging | `.updates/` in the program folder | `~/Library/Application Support/Haven/updates/` (removed after a successful update) |
 
-## 许可
+The macOS `.app` bundle is never written at runtime; settings, the library and caches live in `~/Library/Application Support/Haven`. On Windows the layout is portable beside the executable, so keep the program folder in a writable location so settings, caches and updates can be saved.
 
-Haven 使用 [MIT License](LICENSE)。第三方库和图标等的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Ratings, tags, favorites, flags, color labels and smart albums live in the **library database**:
+
+- Windows: `library/library.sqlite3` in the program folder by default (the older `haven-metadata.sqlite3` is migrated automatically);
+- macOS: `~/Library/Application Support/Haven/library/library.sqlite3`;
+- The library database can be pointed at a shared folder such as a NAS directory in **Settings → Library location**. When Windows and macOS point at the same directory, ratings, tags and smart albums stay in sync; the `.Haven/library.json` file in each photo root records a stable library/root ID;
+- The library directory keeps recent data snapshots under `backups/`. When the network drive is unavailable the photos can still be browsed, but annotations are temporarily unavailable.
+
+Folder and appearance settings (including the interface language) live in `haven-settings.json`. The language setting is device-local and is not written to the shared library.
+
+---
+
+## Shared library (NAS)
+
+Annotations no longer depend on absolute paths specific to one operating system. Each photo has a stable identity made of a `root_id` plus its relative POSIX path inside the root:
+
+- Adding a root writes `library_id`, `root_id` and the folder name into `<root>/.Haven/library.json`, so `Z:\Photos` on Windows and `/Volumes/Photos` on macOS resolve to the same `root_id`.
+- Paths are normalized to Unicode NFC and both sides are resolved first, which also covers mount-prefix differences such as `/var` → `/private/var` on macOS; the same NAS photos therefore get the same identity on both platforms.
+- To share annotations, point **Settings → Library location** on both machines at the same NAS directory. The library database, `library.json` markers and `backups/` then travel with the shared folder.
+
+When the shared location is unavailable, photos can still be browsed and `.Haven` caches are still used, but annotations are unavailable and the Settings dialog shows a warning.
+
+---
+
+## Updates and networking
+
+Browsing and organizing photos works offline. Networking is used only to check for and download GitHub Releases updates and to open the release history when you ask for it.
+
+- Both Windows and macOS support in-app automatic updates, and automatic update checks can be disabled in Settings. Both platforms share the same `update.json` published on GitHub Releases; the manifest contains a `platforms` map with `windows-x64` and `macos-arm64` entries.
+- **Windows** uses a separate `updater.exe` plus `update.json`. The updater validates the HTTPS source, SHA256, file size and version, checks the archive layout, swaps the program files after Haven exits, and restores the previous files if the replacement fails.
+- **macOS** downloads the release zip inside the app and verifies SHA256, the version, the Bundle ID and `codesign --verify`. A small shell helper then waits for Haven to exit, backs up and replaces `Haven.app`, and relaunches it; on failure it restores the backup. The old bundle and downloaded package are removed when the new version launches successfully for the first time.
+- macOS refuses to update when running from App Translocation (for example straight from the Downloads folder or the read-only DMG) or without write permission, and asks you to move the app first. After an update, macOS may ask again for the photo-folder permissions (TCC); allow them when prompted.
+
+Keeping the Windows build in a writable directory is recommended so that settings can be saved and updates can be installed.
+
+---
+
+## Development build
+
+Source builds, tests and release steps are documented in the [development guide](docs/开发文档.md). In short:
+
+- Windows 10/11 x64 with Python 3.14; macOS 11+ on Apple Silicon with Python 3.14.
+- `requirements.txt` contains the runtime and build dependencies. The macOS installer image additionally needs `requirements-build.txt` (`dmgbuild`).
+- Windows: run `scripts/build.ps1`. PyInstaller builds `dist/Haven/`, a separate one-file `updater.exe` is built, and the script generates `dist/Haven-win64.zip` and `update.json`.
+- macOS: run `scripts/build_macos.sh`. PyInstaller with `BUNDLE` and the default ad-hoc code signing produces `dist/Haven.app`; the script verifies the arm64 slice and the code signature, `ditto` creates `dist/Haven-mac-arm64.zip` (used for in-app updates), and `dmgbuild` creates `dist/Haven-mac-arm64.dmg` (used for the first install).
+- Run the backend tests with `python -m unittest discover -s tests -v`. Set `HAVEN_DATA_DIR` to override the user data directory for portable or sandboxed runs.
+
+---
+
+## Platform support
+
+- **Windows 10/11 x64**: full support, using a frameless window with in-app controls and the Edge WebView2 runtime.
+- **macOS 11+ (Apple Silicon)**: browsing, organizing, culling, culling export and the shared library are supported, with a native title bar (traffic lights) and a native menu bar.
+- Both platforms share the same code and the same version number, and are built together for each release.
+- Intel Macs are not supported (the RAW decoding dependency currently ships only an arm64 wheel).
+
+---
+
+## License
+
+Haven is released under the [MIT License](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the licenses of third-party libraries and icons.

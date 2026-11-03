@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 import config
+import i18n
 
 IS_WINDOWS = config.IS_WINDOWS
 IS_MACOS = config.IS_MACOS
@@ -127,21 +128,21 @@ def _windows_clipboard_text(text):
     value = (text + "\0").encode("utf-16-le")
     handle = kernel.GlobalAlloc(0x0042, len(value))
     if not handle:
-        raise OSError("无法分配剪贴板内存")
+        raise OSError(i18n.tr("backend.error.clipboard-allocate"))
     pointer = kernel.GlobalLock(handle)
     if not pointer:
         kernel.GlobalFree(handle)
-        raise OSError("无法锁定剪贴板内存")
+        raise OSError(i18n.tr("backend.error.clipboard-lock"))
     ctypes.memmove(pointer, value, len(value))
     kernel.GlobalUnlock(handle)
     if not user.OpenClipboard(None):
         kernel.GlobalFree(handle)
-        raise OSError("剪贴板被占用，请重试")
+        raise OSError(i18n.tr("backend.error.clipboard-busy"))
     try:
         user.EmptyClipboard()
         if not user.SetClipboardData(13, handle):  # CF_UNICODETEXT
             kernel.GlobalFree(handle)
-            raise OSError("无法写入剪贴板")
+            raise OSError(i18n.tr("backend.error.clipboard-write"))
     finally:
         user.CloseClipboard()
 
@@ -156,7 +157,7 @@ def copy_files(paths):
     elif IS_MACOS:
         _macos_clipboard_files(paths)
     else:
-        raise NotImplementedError("当前平台暂不支持复制文件到剪贴板")
+        raise NotImplementedError(i18n.tr("backend.error.clipboard-unsupported"))
 
 
 def _windows_clipboard_files(paths):
@@ -176,21 +177,21 @@ def _windows_clipboard_files(paths):
     value = struct.pack("<IiiII", 20, 0, 0, 0, 1) + body.encode("utf-16-le")
     handle = kernel.GlobalAlloc(0x0042, len(value))
     if not handle:
-        raise OSError("无法分配剪贴板内存")
+        raise OSError(i18n.tr("backend.error.clipboard-allocate"))
     pointer = kernel.GlobalLock(handle)
     if not pointer:
         kernel.GlobalFree(handle)
-        raise OSError("无法锁定剪贴板内存")
+        raise OSError(i18n.tr("backend.error.clipboard-lock"))
     ctypes.memmove(pointer, value, len(value))
     kernel.GlobalUnlock(handle)
     if not user.OpenClipboard(None):
         kernel.GlobalFree(handle)
-        raise OSError("剪贴板被占用，请重试")
+        raise OSError(i18n.tr("backend.error.clipboard-busy"))
     try:
         user.EmptyClipboard()
         if not user.SetClipboardData(15, handle):  # CF_HDROP
             kernel.GlobalFree(handle)
-            raise OSError("无法写入剪贴板")
+            raise OSError(i18n.tr("backend.error.clipboard-write"))
     finally:
         user.CloseClipboard()
 
@@ -208,7 +209,7 @@ def _macos_clipboard_files(paths):
 
 
 def detect_editors():
-    editors = [{"id": "default", "name": "系统默认程序", "exe": None, "available": True}]
+    editors = [{"id": "default", "name": i18n.tr("backend.editor.system-default"), "exe": None, "available": True}]
     if IS_WINDOWS:
         editors.extend(_windows_editors())
     elif IS_MACOS:
@@ -288,18 +289,18 @@ def _macos_editors():
 def validate_entry_name(name):
     """Validate a file/folder name that must stay safe on both platforms."""
     if not isinstance(name, str) or not name or not name.strip():
-        raise ValueError("名称不能为空")
+        raise ValueError(i18n.tr("backend.error.name-empty"))
     if name in {".", ".."} or "/" in name or "\\" in name:
-        raise ValueError("名称只能包含当前目录中的单个文件名")
+        raise ValueError(i18n.tr("backend.error.name-single"))
     if any(ord(char) < 32 or char in _WINDOWS_INVALID for char in name):
-        raise ValueError("名称包含不允许的字符")
+        raise ValueError(i18n.tr("backend.error.name-chars"))
     if name[-1] in {".", " "}:
-        raise ValueError("名称不能以空格或句点结尾")
+        raise ValueError(i18n.tr("backend.error.name-trailing"))
     stem = name.split(".", 1)[0].upper()
     if stem in _WINDOWS_RESERVED or (stem.startswith(("COM", "LPT")) and stem[3:].isdigit() and 1 <= int(stem[3:]) <= 9):
-        raise ValueError("名称是系统保留名称")
+        raise ValueError(i18n.tr("backend.error.name-reserved"))
     if len(name.encode("utf-8")) > 255:
-        raise ValueError("名称过长（超过 255 字节）")
+        raise ValueError(i18n.tr("backend.error.name-too-long"))
     return name
 
 

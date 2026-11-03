@@ -18,6 +18,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import i18n
 import library
 
 COLORS = {"red", "yellow", "green", "blue", "purple"}
@@ -31,12 +32,12 @@ def normalize_path(path: str | os.PathLike) -> str:
 
 def clean_tag(value: str) -> str:
     if not isinstance(value, str):
-        raise ValueError("标签必须是文本")
+        raise ValueError(i18n.tr("backend.error.tag-text"))
     value = _TAG_SPACE.sub(" ", value.strip())
     if not value:
-        raise ValueError("标签不能为空")
+        raise ValueError(i18n.tr("backend.error.tag-empty"))
     if len(value) > 64:
-        raise ValueError("标签不能超过 64 个字符")
+        raise ValueError(i18n.tr("backend.error.tag-too-long"))
     return value
 
 
@@ -67,7 +68,7 @@ class _FileLock:
                         pass
                     continue
                 if time.monotonic() >= deadline:
-                    raise TimeoutError("元数据库正在被其他设备写入，请稍后重试")
+                    raise TimeoutError(i18n.tr("backend.error.database-busy"))
                 time.sleep(0.05)
                 continue
             try:
@@ -395,16 +396,16 @@ class MetadataStore:
             return {"count": 0, "metadata": {}}
         unknown = set(patch) - {"tags_add", "tags_remove", "rating", "favorite", "flagged", "rejected", "color_label"}
         if unknown:
-            raise ValueError(f"不支持的元数据字段: {', '.join(sorted(unknown))}")
+            raise ValueError(i18n.tr("backend.error.metadata-fields", fields=", ".join(sorted(unknown))))
         rating = patch.get("rating", "__missing__")
         if rating != "__missing__" and rating is not None and (not isinstance(rating, int) or not 1 <= rating <= 5):
-            raise ValueError("评分必须是 1 到 5 星，或清除评分")
+            raise ValueError(i18n.tr("backend.error.rating-range"))
         color = patch.get("color_label", "__missing__")
         if color != "__missing__" and color is not None and color not in COLORS:
-            raise ValueError("颜色标签无效")
+            raise ValueError(i18n.tr("backend.error.color-label"))
         for key in ("favorite", "flagged", "rejected"):
             if key in patch and not isinstance(patch[key], bool):
-                raise ValueError(f"{key} 必须是布尔值")
+                raise ValueError(i18n.tr("backend.error.boolean-field", field=key))
         adds = [clean_tag(value) for value in patch.get("tags_add", [])]
         removes = [clean_tag(value) for value in patch.get("tags_remove", [])]
         connection = self._connection()
@@ -516,23 +517,23 @@ class MetadataStore:
     def get_smart_album(self, album_id):
         row = self._connection().execute("SELECT * FROM smart_albums WHERE id=?", (int(album_id),)).fetchone()
         if not row:
-            raise ValueError("智能相册不存在")
+            raise ValueError(i18n.tr("backend.error.smart-album-missing"))
         return dict(row) | {"definition": json.loads(row["definition"])}
 
     def save_smart_album(self, name, definition, album_id=None):
         name = clean_tag(name)
         if not isinstance(definition, dict) or definition.get("logic", "and").lower() not in {"and", "or"} or not isinstance(definition.get("conditions", []), list):
-            raise ValueError("智能相册条件无效")
+            raise ValueError(i18n.tr("backend.error.smart-album-definition"))
         allowed = {"tags", "rating", "color_label", "favorite", "flagged", "rejected"}
         operators = {"tags": {"contains", "not_contains", "="}, "rating": {"=", ">=", "<=", "is_empty"}, "color_label": {"="}, "favorite": {"="}, "flagged": {"="}, "rejected": {"="}}
         for condition in definition["conditions"]:
             if not isinstance(condition, dict) or condition.get("field") not in allowed or condition.get("operator") not in operators[condition["field"]]:
-                raise ValueError("智能相册条件无效")
+                raise ValueError(i18n.tr("backend.error.smart-album-definition"))
             field, value = condition["field"], condition.get("value")
             if field == "rating" and condition["operator"] != "is_empty" and (value != "unrated" and (not isinstance(value, int) or not 1 <= value <= 5)):
-                raise ValueError("智能相册评分条件无效")
+                raise ValueError(i18n.tr("backend.error.smart-album-rating"))
             if field == "color_label" and value not in COLORS:
-                raise ValueError("智能相册颜色条件无效")
+                raise ValueError(i18n.tr("backend.error.smart-album-color"))
             if field == "tags":
                 clean_tag(value)
         encoded = json.dumps(definition, ensure_ascii=False, separators=(",", ":"))
