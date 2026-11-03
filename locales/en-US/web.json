@@ -284,6 +284,7 @@
   "web.settings.language-system": "Follow System",
   "web.language.zh-CN": "简体中文",
   "web.language.en-US": "English",
+  "web.language.ja-JP": "日本語",
   "web.settings.auto-update": "Check for updates automatically",
   "web.settings.export-mode": "After culling",
   "web.settings.export-copy": "Copy to new folder",

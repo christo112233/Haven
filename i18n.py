@@ -20,7 +20,7 @@ import subprocess
 
 import config
 
-SUPPORTED = ("en-US", "zh-CN")
+SUPPORTED = ("en-US", "zh-CN", "ja-JP")
 FALLBACK = "en-US"
 SYSTEM = "system"
 
@@ -121,6 +121,8 @@ def normalize(value):
         return "zh-CN"
     if lowered.startswith("en"):
         return "en-US"
+    if lowered.startswith("ja"):
+        return "ja-JP"
     return canonical
 
 

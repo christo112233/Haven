@@ -10,10 +10,11 @@ import subprocess
 import unittest
 from pathlib import Path
 
+import i18n
+
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 LOCALES = ROOT / "locales"
-SUPPORTED = ("zh-CN", "en-US")
 
 PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 HTML_I18N_ATTRIBUTE = re.compile(r'data-i18n(?:-[a-z-]+)?="([^"]+)"')
@@ -36,63 +37,58 @@ def base_keys(catalog):
 class WebI18nTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.zh = web_catalog("zh-CN")
-        cls.en = web_catalog("en-US")
+        cls.catalogs = {locale: web_catalog(locale) for locale in i18n.SUPPORTED}
         cls.html = (WEB / "index.html").read_text(encoding="utf-8")
         cls.app_js = (WEB / "app.js").read_text(encoding="utf-8")
         cls.html_keys = set(HTML_I18N_ATTRIBUTE.findall(cls.html))
         cls.js_keys = set(JS_KEY.findall(cls.app_js))
 
-    def test_markup_keys_exist_in_both_catalogs(self):
-        zh, en = base_keys(self.zh), base_keys(self.en)
+    def test_markup_keys_exist_in_every_catalog(self):
         self.assertTrue(self.html_keys, "index.html has no data-i18n attributes")
-        for key in sorted(self.html_keys):
-            self.assertIn(key, zh, f"index.html key missing from zh-CN: {key}")
-            self.assertIn(key, en, f"index.html key missing from en-US: {key}")
+        for locale, catalog in self.catalogs.items():
+            keys = base_keys(catalog)
+            for key in sorted(self.html_keys):
+                self.assertIn(key, keys, f"index.html key missing from {locale}: {key}")
 
     def test_markup_keys_are_static(self):
         """applyI18n() has no parameters, so markup keys must be parameter free."""
         for key in sorted(self.html_keys):
-            for locale, catalog in (("zh-CN", self.zh), ("en-US", self.en)):
+            for locale, catalog in self.catalogs.items():
                 value = catalog.get(key, "")
                 self.assertEqual(
                     PLACEHOLDER.findall(value), [],
                     f"static markup key {key} has placeholders in {locale}",
                 )
 
-    def test_app_keys_exist_in_both_catalogs(self):
-        zh, en = base_keys(self.zh), base_keys(self.en)
-        for key in sorted(self.js_keys):
-            # platformKey('web.trash.move-title') expands to .mac / .win entries
-            platform = {f"{key}.mac", f"{key}.win"}
-            self.assertTrue(
-                key in zh or platform <= zh,
-                f"app.js key missing from zh-CN: {key}",
-            )
-            self.assertTrue(
-                key in en or platform <= en,
-                f"app.js key missing from en-US: {key}",
-            )
+    def test_app_keys_exist_in_every_catalog(self):
+        for locale, catalog in self.catalogs.items():
+            keys = base_keys(catalog)
+            for key in sorted(self.js_keys):
+                # platformKey('web.trash.move-title') expands to .mac / .win entries
+                platform = {f"{key}.mac", f"{key}.win"}
+                self.assertTrue(
+                    key in keys or platform <= keys,
+                    f"app.js key missing from {locale}: {key}",
+                )
 
     def test_catalogs_are_parallel_and_complete(self):
-        zh, en = base_keys(self.zh), base_keys(self.en)
-        self.assertEqual(en - zh, set(), "keys present in en-US but missing in zh-CN")
-        self.assertEqual(zh - en, set(), "keys present in zh-CN but missing in en-US")
-        for locale, catalog in (("zh-CN", self.zh), ("en-US", self.en)):
+        reference = base_keys(self.catalogs[i18n.FALLBACK])
+        for locale, catalog in self.catalogs.items():
             self.assertTrue(catalog, f"{locale} web catalog is empty")
+            keys = base_keys(catalog)
+            self.assertEqual(keys - reference, set(), f"extra keys in {locale}")
+            self.assertEqual(reference - keys, set(), f"keys missing from {locale}")
             for key, value in catalog.items():
                 self.assertTrue(value.strip(), f"{locale}: empty value for {key}")
                 self.assertNotEqual(value, key, f"{locale}: untranslated value for {key}")
-        for key, value in self.zh.items():
-            self.assertFalse(key.endswith(".one"), f"zh-CN should not define {key}")
-            self.assertEqual(
-                sorted(PLACEHOLDER.findall(value)),
-                sorted(PLACEHOLDER.findall(self.en.get(key, ""))),
-                f"placeholder mismatch for {key}",
-            )
-        for key in self.en:
-            if key.endswith(".one"):
-                self.assertIn(key.removesuffix(".one"), self.en, f"{key} has no base entry")
+                if key.endswith(".one"):
+                    self.assertEqual(locale, "en-US", f"{locale} should not define {key}")
+                    self.assertIn(key.removesuffix(".one"), catalog, f"{key} has no base entry")
+                self.assertEqual(
+                    sorted(PLACEHOLDER.findall(value)),
+                    sorted(PLACEHOLDER.findall(self.catalogs[i18n.FALLBACK].get(key, ""))),
+                    f"placeholder mismatch for {key} in {locale}",
+                )
 
     def test_markup_has_no_user_visible_chinese(self):
         visible = HTML_COMMENT.sub("", self.html)

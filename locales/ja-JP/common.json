@@ -1,0 +1,10 @@
+{
+  "server.unauthorized": "認証されていません",
+  "server.api-missing": "不明な API メソッドです",
+  "server.request-too-large": "リクエストが大きすぎます",
+  "server.unknown-media-mode": "不明なメディアモードです",
+  "server.motion-unsupported": "このファイルには対応する Motion Photo 動画がありません",
+  "error.invalid-language": "未対応の言語です",
+  "main.drop-failed": "フォルダーのドラッグ＆ドロップを有効にできませんでした：{error}",
+  "main.sidebar-not-ready": "サイドバーが読み込まれませんでした"
+}

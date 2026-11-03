@@ -20,6 +20,7 @@ import platform_support
 import thumbs
 import updater
 import updater_macos
+from updater_src import updater as helper
 
 BACKEND_PREFIX = "backend."
 
@@ -37,13 +38,26 @@ class BackendI18nTestCase(unittest.TestCase):
 
 class CatalogTests(BackendI18nTestCase):
     def test_backend_catalogs_are_complete(self):
-        zh = i18n.catalog("zh-CN")
         en = i18n.catalog("en-US")
         # ``.one`` is an English-only singular variant of a base key.
-        backend_zh = {key.removesuffix(".one") for key in zh if key.startswith(BACKEND_PREFIX)}
         backend_en = {key.removesuffix(".one") for key in en if key.startswith(BACKEND_PREFIX)}
-        self.assertTrue(backend_zh)
-        self.assertEqual(backend_zh, backend_en)
+        self.assertTrue(backend_en)
+        for locale in i18n.SUPPORTED:
+            catalog = i18n.catalog(locale)
+            backend = {key.removesuffix(".one") for key in catalog if key.startswith(BACKEND_PREFIX)}
+            self.assertEqual(backend, backend_en, f"backend keys differ for {locale}")
+
+    def test_windows_updater_helper_messages_are_parallel(self):
+        reference = set(helper.MESSAGES["en-US"])
+        self.assertTrue(reference)
+        for locale, messages in helper.MESSAGES.items():
+            self.assertEqual(set(messages), reference, f"updater helper messages differ for {locale}")
+        helper.set_language("ja-JP")
+        try:
+            self.assertIn("Haven", helper.tr("title"))
+            self.assertIn("{error}", helper.tr("failed"))
+        finally:
+            helper.set_language("en-US")
 
     def test_switching_language_changes_backend_output(self):
         self.configure("zh-CN")

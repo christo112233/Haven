@@ -50,6 +50,21 @@ MESSAGES = {
         "version": "The update archive version does not match the manifest",
         "installed": "The installed version is already the same or newer",
     },
+    "ja-JP": {
+        "title": "Haven アップデート",
+        "failed": "アップデートに失敗しました。以前のバージョンは保持または復元されています。\n{error}",
+        "too-large": "展開する内容が大きすぎます",
+        "unsafe-path": "アップデートパッケージに安全でないパスが含まれています",
+        "non-owned": "アップデートパッケージに Haven 以外のファイルまたはシンボリックリンクが含まれています",
+        "duplicate": "アップデートパッケージに重複したファイルが含まれています",
+        "missing": "アップデートパッケージに必要なプログラムファイルがありません",
+        "symlink": "プログラムファイルをシンボリックリンクにすることはできません",
+        "timeout": "Haven が終了しないため、アップデートを中止しました",
+        "downgrade": "ダウングレードおよび同じバージョンへの再適用は拒否されました",
+        "checksum": "アップデートパッケージの検証に失敗しました",
+        "version": "アップデートパッケージのバージョンがマニフェストと一致しません",
+        "installed": "インストール済みのバージョンは既に同じか新しいものです",
+    },
 }
 
 _language = "en-US"

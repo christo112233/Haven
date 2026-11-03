@@ -72,7 +72,7 @@ So even when a single folder holds thousands of photos, browsing, filtering and 
     Burst and stacked shots are detected and collapsed automatically without taking extra space.
 
 - **Interface language**  
-  In **Settings → Language** you can switch the interface between **Follow System**, **简体中文** (Simplified Chinese) and **English**. Unsupported system languages fall back to English. The language is a device-local preference and is not synced through a shared NAS library.
+  In **Settings → Language** you can switch the interface between **Follow System**, **简体中文** (Simplified Chinese), **English** and **日本語** (Japanese). Unsupported system languages fall back to English. The language is a device-local preference and is not synced through a shared NAS library.
 
 ---
 
