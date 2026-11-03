@@ -161,7 +161,7 @@ Haven 识别常见图片（JPG、PNG、WebP、BMP、GIF、TIFF）、HEIC/HEIF、
 ## 平台支持
 
 - Windows 10/11 x64：完整支持。
-- macOS 11+（Apple Silicon）：支持浏览、整理、选片、选片导出、共享图库；暂不支持应用内自动更新。
+- macOS 11+（Apple Silicon）：支持浏览、整理、选片、选片导出、共享图库；
 - 两个平台使用同一份代码与同一个版本号，发布时同时构建。
 
 ## 许可
