@@ -76,6 +76,7 @@ def directory(folder, create=True):
             try:
                 atomic_json(staging / "owner.json", {"app": "Haven"})
                 (staging / "thumbs").mkdir()
+                (staging / "displays").mkdir()
                 (staging / "previews").mkdir()
                 try:
                     staging.rename(target)
@@ -87,7 +88,7 @@ def directory(folder, create=True):
                     shutil.rmtree(staging)
         if target.is_symlink() or (target.exists() and read_json(marker) != {"app": "Haven"}):
             raise PermissionError(i18n.tr("backend.error.cache-not-haven"))
-        for name in ("thumbs", "previews"):
+        for name in ("thumbs", "displays", "previews"):
             child = target / name
             if child.is_symlink():
                 raise PermissionError(i18n.tr("backend.error.cache-symlink"))

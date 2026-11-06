@@ -45,6 +45,11 @@ class Api:
         self.state.setdefault("theme", "dark")
         self.state.setdefault("thumb_size", 240)
         self.state.setdefault("glass_transparency", 0.24)
+        # Light table look, remembered per machine (not photo data).
+        self.state.setdefault("lighttable_lamp", True)
+        self.state.setdefault("lighttable_brightness", 1.0)
+        self.state.setdefault("lighttable_sound", True)
+        self.state.setdefault("lighttable_temperature", 5000)
         self.state.setdefault("library_dir", "")
         self.state.setdefault("root_ids", {})
         # Device-local UI language ("system", "zh-CN" or "en-US"); never synced
@@ -288,11 +293,26 @@ class Api:
         return {"ok": True}
 
     def settings(self, changes):
-        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency", "external_editor", "export_folder", "export_mode", "session", "stack", "stack_base_gap", "stack_factor"}
+        allowed = {"expanded", "current", "theme", "thumb_size", "auto_update", "skipped_version", "recursive", "glass_transparency", "external_editor", "export_folder", "export_mode", "session", "stack", "stack_base_gap", "stack_factor", "lighttable_lamp", "lighttable_brightness", "lighttable_sound", "lighttable_temperature"}
         if "export_mode" in changes and changes.get("export_mode") not in {"copy", "move"}:
             raise ValueError(i18n.tr("backend.error.export-mode"))
         if "session" in changes and changes.get("session") is not None and not isinstance(changes.get("session"), dict):
             raise ValueError(i18n.tr("backend.error.culling-session"))
+        if "lighttable_brightness" in changes:
+            try:
+                brightness = float(changes["lighttable_brightness"])
+            except (TypeError, ValueError):
+                brightness = 1.0
+            changes["lighttable_brightness"] = min(1.6, max(0.2, brightness))
+        for key in ("lighttable_lamp", "lighttable_sound"):
+            if key in changes:
+                changes[key] = bool(changes[key])
+        if "lighttable_temperature" in changes:
+            try:
+                temperature = float(changes["lighttable_temperature"])
+            except (TypeError, ValueError):
+                temperature = 5000
+            changes["lighttable_temperature"] = min(6500, max(3000, temperature))
         for key in ("stack_base_gap", "stack_factor"):
             if key in changes:
                 try:

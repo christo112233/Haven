@@ -71,6 +71,13 @@ So even when a single folder holds thousands of photos, browsing, filtering and 
   - **Smart stacks**  
     Burst and stacked shots are detected and collapsed automatically without taking extra space.
 
+- **Light table**  
+  Gather picks into a session-only darkroom: lay photos on a lit board, switch the lamp on and off, adjust brightness, drag/rotate/scale them, and hold Space to look closer with the magnifier (no need to switch it on first). Nothing is written to the library; closing Haven empties the board. The lamp state, brightness, colour temperature and the UI-sound switch are remembered on this machine; the pad has a metal bezel and rulers, ambient light follows the lamp, and double-clicking the brightness slider returns it to 100%.
+
+  - **Add to the light table** from a photo's context menu or the bulk toolbar; open it from the button next to **Start Culling**.
+  - **Arrange** with four layouts — justified rows, hero magazine (the selected photo becomes the hero), contact sheet (uniform 3:2 frames) and darkroom scatter; **Reset** returns to the poured-out default. `T` opens the layout menu.
+  - **Leave or clear** with Esc, Delete (removes the selected photo from the board) or **Clear light table** (asks for confirmation first).
+
 - **Interface language**  
   In **Settings → Language** you can switch the interface between **Follow System**, **简体中文** (Simplified Chinese), **English** and **日本語** (Japanese). Unsupported system languages fall back to English. The language is a device-local preference and is not synced through a shared NAS library.
 

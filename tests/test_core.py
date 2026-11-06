@@ -258,6 +258,34 @@ class CoreTests(unittest.TestCase):
         changed = scanner.scan(self.root)[0][0]
         self.assertNotEqual(thumbs.get(changed)[0], data)
 
+    def test_display_tier_is_cached_jpeg(self):
+        path = self.root / "display.jpg"
+        exif = Image.Exif()
+        exif[274] = 6
+        Image.new("RGB", (2000, 1500), "red").save(path, exif=exif)
+        item = scanner.scan(self.root)[0][0]
+        data, warning = thumbs.get(item, "display")
+        self.assertIsNone(warning)
+        with Image.open(BytesIO(data)) as image:
+            self.assertEqual(image.format, "JPEG")
+            self.assertEqual(max(image.size), 1280)
+            self.assertLess(image.width, image.height)
+        target = self.root / ".Haven" / "displays" / "display.jpg.jpg"
+        self.assertEqual(target.read_bytes(), data)
+        self.assertEqual(
+            cache.read_json(target.with_suffix(target.suffix + ".json")),
+            {"signature": item["signature"], "version": cache.CACHE_VERSION},
+        )
+        with patch("thumbs.render", side_effect=AssertionError("must reuse cache")):
+            self.assertEqual(thumbs.get(item, "display")[0], data)
+
+    def test_cache_directory_creates_display_tier(self):
+        cache.directory(self.root)
+        self.assertTrue((self.root / ".Haven" / "displays").is_dir())
+        shutil.rmtree(self.root / ".Haven" / "displays")
+        cache.directory(self.root)
+        self.assertTrue((self.root / ".Haven" / "displays").is_dir())
+
     def test_readonly_in_memory_and_owned_cleanup(self):
         self.photo()
         item = scanner.scan(self.root)[0][0]
@@ -300,7 +328,7 @@ class CoreTests(unittest.TestCase):
                 Image.new("RGB", (900, 600), "#75a4b8").save(path, format=format_name)
                 self.assertEqual(metadata.read(path, extension)["width"], 900)
                 item = next(i for i in scanner.scan(self.root)[0] if i["ext"] == extension)
-                preview, warning = thumbs.get(item, True)
+                preview, warning = thumbs.get(item, "preview")
                 self.assertIsNone(warning)
                 with Image.open(BytesIO(preview)) as image:
                     self.assertEqual(image.format, "JPEG")
@@ -326,7 +354,7 @@ class CoreTests(unittest.TestCase):
                 self.assertNotIn("error", item)
                 self.assertGreater(item["width"], 0)
                 self.assertTrue((self.root / ".Haven" / "thumbs" / "camera.CR2.webp").is_file())
-                preview, warning = thumbs.get(item, True)
+                preview, warning = thumbs.get(item, "preview")
                 self.assertIsNone(warning)
                 with Image.open(BytesIO(preview)) as image:
                     self.assertLessEqual(max(image.size), 2560)
@@ -356,6 +384,13 @@ class CoreTests(unittest.TestCase):
                     urlopen(Request(url, headers={"Range": "bytes=99999999-"}))
                 self.assertEqual(error.exception.code, 416)
                 error.exception.close()
+                display_url = base + "media?" + urlencode({"token": token, "path": str(path), "mode": "display"})
+                with urlopen(display_url) as response:
+                    self.assertEqual(response.headers.get_content_type(), "image/jpeg")
+                    body = response.read()
+                with Image.open(BytesIO(body)) as image:
+                    self.assertEqual(image.format, "JPEG")
+                    self.assertLessEqual(max(image.size), 1280)
                 with self.assertRaises(PermissionError):
                     api.authorize(config.APP_DIR / "config.py")
                 job = api.open_folder(str(self.root))["job"]

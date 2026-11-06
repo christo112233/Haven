@@ -79,10 +79,10 @@ def start(api, port=0):
                     if mode == "original":
                         self.stream_file(Path(item["path"]))
                         return
-                    if mode not in {"thumb", "preview"}:
+                    if mode not in {"thumb", "display", "preview"}:
                         raise ValueError(i18n.tr("server.unknown-media-mode"))
-                    body, warning = thumbs.get(item, mode == "preview")
-                    self.headers_for("image/jpeg" if mode == "preview" else "image/webp", len(body))
+                    body, warning = thumbs.get(item, mode)
+                    self.headers_for("image/webp" if mode == "thumb" else "image/jpeg", len(body))
                     self.wfile.write(body)
                     return
                 name = "index.html" if parsed.path == "/" else parsed.path.lstrip("/")
