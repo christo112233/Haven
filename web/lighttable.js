@@ -78,6 +78,9 @@
     if (typeof settings.lighttable_sound === 'boolean') state.sound = settings.lighttable_sound;
     const temperature = Number(settings.lighttable_temperature);
     if (Number.isFinite(temperature)) state.temperature = clamp(temperature, 3000, 6500);
+    if (settings.lighttable_magnify === "eight" || settings.lighttable_magnify === "original") {
+      state.magnify = settings.lighttable_magnify;
+    }
     if (!els) {
       pendingSettings = settings;
       return;
@@ -1471,6 +1474,7 @@
   function setMagnify(mode) {
     if (!mode || state.magnify === mode) return;
     state.magnify = mode;
+    saveSettings({ lighttable_magnify: mode });
     playTick();
     syncLoupe();
     if (state.closeUp) trackLens(1, closeFieldTarget(), 0.26, easeInOut);

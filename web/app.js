@@ -184,6 +184,15 @@ function glassSelect(id) {
         menu.style.left = `${Math.max(12, Math.min(bounds.left, innerWidth - menu.offsetWidth - 12))}px`;
         menu.style.top = `${bounds.bottom + 8 + height <= innerHeight - 12 ? bounds.bottom + 8 : Math.max(12, bounds.top - height - 8)}px`;
       }
+      if (shell.closest('#settings-dialog')) {
+        const bounds = button.getBoundingClientRect();
+        const dialog = shell.closest('#settings-dialog');
+        const dialogBounds = dialog.getBoundingClientRect();
+        const menuHeight = menu.getBoundingClientRect().height || 160;
+        const spaceBelow = dialogBounds.bottom - bounds.bottom - 16;
+        const spaceAbove = bounds.top - dialogBounds.top - 16;
+        menu.classList.toggle('drop-up', menuHeight > spaceBelow && spaceAbove > spaceBelow);
+      }
       if (shell.closest('.smart-condition')) {
         const dialog = shell.closest('dialog');
         if (dialog && !menu.dataset.dialogMenu) {

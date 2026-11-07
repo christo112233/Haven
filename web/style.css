@@ -206,6 +206,7 @@ select option { background: #132c3f; color: #effaff; }
 .select-menu { max-height: min(260px, 42vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .panel-dialog { overflow: visible; }
 .panel-dialog .select-menu { z-index: 80; min-width: 180px; max-height: 230px; }
+.select-menu.drop-up { top: auto; bottom: calc(100% + 9px); }
 .select-menu[hidden] { display: none; }
 .select-option { display: block; width: 100%; padding: 10px 15px; border-radius: 12px; font-size: 12px; text-align: left; white-space: nowrap; color: var(--text); }
 .select-option { transition: background-color .28s ease, filter .28s ease, transform .28s var(--spring); }
@@ -276,6 +277,7 @@ dialog:focus, dialog:focus-visible { outline: none; }
 dialog::backdrop { background: rgba(4, 20, 32, .24); backdrop-filter: blur(16px) saturate(1.08); -webkit-backdrop-filter: blur(16px) saturate(1.08); animation: backdrop-enter .35s ease; }
 :root[data-theme="light"] dialog::backdrop { background: rgba(218, 235, 244, .32); }
 .panel-dialog { width: 440px; max-width: calc(100vw - 32px); padding: 28px; border-radius: 26px; background: var(--panel-fill); background: color-mix(in srgb, var(--panel-fill) calc(var(--glass-alpha-factor) * 100%), transparent); }
+#settings-dialog { max-height: calc(100dvh - 40px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .panel-dialog[open] { animation: panel-enter .18s cubic-bezier(.2,.8,.2,1) both; }
 #viewer, #details, #context-menu, #toast { color: #f2fbfd; }
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }

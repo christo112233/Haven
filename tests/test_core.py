@@ -629,6 +629,27 @@ class CoreTests(unittest.TestCase):
                 api.close()
 
 
+    def test_light_table_view_settings_are_coerced(self):
+        with patch("config.STATE_PATH", self.root / "settings.json"):
+            api = Api()
+            try:
+                api.settings({
+                    "lighttable_lamp": 0,
+                    "lighttable_brightness": 5,
+                    "lighttable_sound": "yes",
+                    "lighttable_temperature": 9000,
+                    "lighttable_magnify": "bogus",
+                })
+                self.assertFalse(api.state["lighttable_lamp"])
+                self.assertEqual(api.state["lighttable_brightness"], 1.6)
+                self.assertTrue(api.state["lighttable_sound"])
+                self.assertEqual(api.state["lighttable_temperature"], 6500)
+                self.assertEqual(api.state["lighttable_magnify"], "eight")
+                api.settings({"lighttable_magnify": "original"})
+                self.assertEqual(api.state["lighttable_magnify"], "original")
+            finally:
+                api.close()
+
     def test_trash_rejected_and_count(self):
         rejected = self.photo("reject.jpg")
         keep = self.photo("keep.jpg")
