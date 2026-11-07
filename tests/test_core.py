@@ -421,6 +421,12 @@ class CoreTests(unittest.TestCase):
             helper.extract(package, self.root / "stage")
         self.assertFalse((self.root.parent / "escape.txt").exists())
 
+    def test_update_requests_ship_a_usable_ca_bundle(self):
+        # Frozen builds must not depend on the build machine's OpenSSL paths;
+        # certifi is bundled so HTTPS update checks keep working on macOS.
+        context = updater.ssl_context()
+        self.assertGreater(context.cert_store_stats()["x509_ca"], 0)
+
     def test_updater_restores_partial_replacement(self):
         target, stage, backup = (self.root / name for name in ("target", "stage", "backup"))
         target.mkdir(); stage.mkdir()

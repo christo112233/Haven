@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,11 @@ from packaging.version import Version
 import config
 import cache
 import i18n
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - requirements pin certifi
+    certifi = None
 
 
 def validate_manifest(data, current):
@@ -67,8 +73,29 @@ def select_update(data, current, platform=None):
     return validate_manifest(selected, current)
 
 
+def ssl_context():
+    """TLS context with a reliable CA bundle.
+
+    A frozen PyInstaller build does not inherit the build machine's OpenSSL
+    certificate directory, so ``urlopen`` can fail with
+    ``CERTIFICATE_VERIFY_FAILED`` on macOS. ``certifi`` ships its own bundle and
+    PyInstaller bundles it automatically; fall back to the platform default
+    store whenever it is unavailable.
+    """
+    if certifi is not None:
+        try:
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            pass
+    return ssl.create_default_context()
+
+
 def request(url):
-    response = urlopen(Request(url, headers={"User-Agent": f"Haven/{config.VERSION}"}), timeout=8)
+    response = urlopen(
+        Request(url, headers={"User-Agent": f"Haven/{config.VERSION}"}),
+        timeout=8,
+        context=ssl_context(),
+    )
     if urlparse(response.url).scheme != "https":
         response.close()
         raise ValueError(i18n.tr("backend.error.update-redirect"))

@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import sys
 
-VERSION = "3.3.0"
+VERSION = "3.3.1"
 CACHE_VERSION = 3
 CACHE_NAME = ".Haven"
 IS_WINDOWS = sys.platform == "win32"
