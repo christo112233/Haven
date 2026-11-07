@@ -63,7 +63,7 @@ def main():
         webview.settings['DRAG_REGION_SELECTOR'] = '.haven-native-drag-disabled'
     # Windows keeps its frameless window with custom controls; macOS uses the
     # native title bar so the standard traffic lights stay available.
-    window = webview.create_window("Haven", api.base_url, width=1440, height=920, min_size=(800, 560), background_color="#0d293d", frameless=config.IS_WINDOWS, easy_drag=False)
+    window = webview.create_window("Haven", api.base_url, width=1440, height=920, min_size=(800, 560), background_color="#101114", frameless=config.IS_WINDOWS, easy_drag=False)
     # Expose only the frontend contract; native windows and executors stay private.
     window.expose(*(getattr(api, name) for name in sorted(METHODS)))
     api.window = window

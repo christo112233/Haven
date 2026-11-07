@@ -18,6 +18,17 @@
   const MAX_PREVIEWS = 8;
   const BAR_RESERVE = 128;
 
+  // Radial sampling curve for the loupe rim. Content only bends in a thin
+  // band at the very edge, where a thick lens refracts hardest. The factor
+  // multiplies the flat sample radius, so >1 crowds content toward the rim.
+  const RIM_BAND = 0.88;
+  function rimSampleScale(t) {
+    if (t <= RIM_BAND) return 1;
+    const u = (t - RIM_BAND) / (1 - RIM_BAND);
+    const u2 = u * u;
+    return 1 + 0.14 * u2 * u2 * u2;
+  }
+
   const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
   const smoothstep = (x) => { const t = clamp(x, 0, 1); return t * t * (3 - 2 * t); };
@@ -30,6 +41,7 @@
   const state = {
     items: [], open: false, selected: null,
     lampOn: true, brightness: 1, temperature: 5000,
+    lampLevel: 0, lampFlare: 0,
     loupe: false, closeUp: false, spaceLoupe: false, magnify: 'eight',
     pointer: null, inside: false, overUI: false, lensD: NORMAL_LENS,
     closeBlend: 0, field: NORMAL_FIELD, backingD: NORMAL_LENS,
@@ -40,6 +52,11 @@
     lastW: 0, lastH: 0, previews: new Map()
   };
   let els = null;
+
+  // The lens field is drawn into this buffer at lens resolution so the rim
+  // rings sample a small texture instead of rescaling the full photo.
+  let fieldCanvas = null;
+  let fieldCtx = null;
 
   function samePath(a, b) {
     return String(a || '').replace(/[\\/]+$/, '').toLowerCase() === String(b || '').replace(/[\\/]+$/, '').toLowerCase();
@@ -94,7 +111,7 @@
     syncLamp();
     syncSound();
     if (state.open) {
-      applyLamp(state.lampOn ? 1.1 : -1);
+      resetLampOutput();
       if (els.hint) els.hint.textContent = t('web.lighttable.hint');
     }
   }
@@ -394,6 +411,14 @@
     });
     img.src = mediaURL({ path: item.path }, 'thumb');
 
+    // A blurred copy behind the print fakes light bleeding through the paper.
+    const glow = document.createElement('img');
+    glow.className = 'lt-glow';
+    glow.alt = '';
+    glow.draggable = false;
+    glow.setAttribute('aria-hidden', 'true');
+    glow.src = img.src;
+
     const rotate = document.createElement('span');
     rotate.className = 'lt-handle lt-rotate';
     rotate.setAttribute('aria-hidden', 'true');
@@ -401,7 +426,7 @@
     resize.className = 'lt-handle lt-resize';
     resize.setAttribute('aria-hidden', 'true');
 
-    el.append(img, rotate, resize);
+    el.append(img, glow, rotate, resize);
     els.stage.append(el);
     item.el = el;
     item.img = img;
@@ -968,30 +993,25 @@
     return 0.90 + (power - 1) * 0.08;
   }
 
-  function applyLamp(tSeconds) {
-    let transmission = 0;
-    let flare = 0;
-    if (state.lampOn) {
-      if (tSeconds >= 1.1) {
-        transmission = 1;
-      } else {
-        transmission = smoothstep(tSeconds / 0.12);
-        if (tSeconds < 0.16) flare = smoothstep(tSeconds / 0.16);
-        else if (tSeconds < 0.28) flare = 1;
-        else flare = 1 - quintic((tSeconds - 0.28) / (1.1 - 0.28));
-      }
-    }
+  function applyLamp(level, flare) {
     const power = state.brightness;
-    const level = Math.sqrt(clamp(power, 0.1, 1));
-    const stops = 0.8 * flare * Math.sqrt(clamp(power, 0.1, 1));
-    const photo = (0.16 + 0.84 * level * transmission) * Math.pow(2, 0.42 * stops);
-    const panel = 0.05 + 0.95 * panelWhite(power) * transmission;
-    const glare = flare * transmission * 0.34;
+    const base = Math.sqrt(clamp(power, 0.1, 1));
+    const stops = 0.8 * flare * base;
+    const photo = (0.16 + 0.84 * level * base) * Math.pow(2, 0.42 * stops);
+    const panel = 0.05 + 0.95 * panelWhite(power) * level;
+    const glare = flare * level * 0.34;
     const root = els.root;
     root.style.setProperty('--lt-panel', panel.toFixed(4));
     root.style.setProperty('--lt-photo', photo.toFixed(4));
     root.style.setProperty('--lt-flare', glare.toFixed(4));
-    root.style.setProperty('--lt-room', (transmission * (0.03 + 0.14 * panel)).toFixed(4));
+    root.style.setProperty('--lt-room', (level * (0.03 + 0.14 * panel)).toFixed(4));
+    root.style.setProperty('--lt-metal', (0.18 + 0.82 * level).toFixed(4));
+  }
+
+  function resetLampOutput() {
+    state.lampLevel = state.lampOn ? 1 : 0;
+    state.lampFlare = 0;
+    applyLamp(state.lampLevel, 0);
   }
 
   const TEMPERATURE_PRESETS = { warm: 3200, neutral: 5000, cool: 6500 };
@@ -1033,6 +1053,10 @@
       root.style.setProperty('--lt-glow-rgb', glow.r + ', ' + glow.g + ', ' + glow.b);
       root.style.setProperty('--lt-sepia', (warm * 0.14).toFixed(3));
       root.style.setProperty('--lt-cool-shift', cool.toFixed(3));
+      root.style.setProperty('--lt-shadow-rgb',
+        Math.round(7 + 9 * warm - cool) + ', ' +
+        Math.round(9 + 2 * warm) + ', ' +
+        Math.round(14 - 7 * warm + 3 * cool));
     }
     syncTemperature();
   }
@@ -1063,28 +1087,54 @@
     }
     cancelAnimationFrame(state.lampRaf);
     state.lampRaf = 0;
-    if (!state.lampOn) {
-      els.root.classList.remove('lt-animating');
-      applyLamp(-1);
-      return;
-    }
     if (!animate || reduceMotion()) {
       els.root.classList.remove('lt-animating');
-      applyLamp(1.1);
+      resetLampOutput();
       return;
     }
     els.root.classList.add('lt-animating');
     const started = performance.now();
+    if (!state.lampOn) {
+      // Cool down: the glow leaves first, then the panel and metal fade.
+      const fromLevel = state.lampLevel;
+      const fromFlare = state.lampFlare;
+      const step = (now) => {
+        const progress = clamp((now - started) / 560, 0, 1);
+        state.lampLevel = fromLevel * (1 - easeInOut(progress));
+        state.lampFlare = fromFlare * (1 - easeOutCubic(progress));
+        applyLamp(state.lampLevel, state.lampFlare);
+        if (progress < 1) {
+          state.lampRaf = requestAnimationFrame(step);
+          return;
+        }
+        state.lampRaf = 0;
+        state.lampLevel = 0;
+        state.lampFlare = 0;
+        applyLamp(0, 0);
+        els.root.classList.remove('lt-animating');
+      };
+      state.lampRaf = requestAnimationFrame(step);
+      return;
+    }
+    // Warm up: the panel builds over half a second, the flare spikes and
+    // settles over about a second.
+    const fromLevel = state.lampLevel;
     const step = (now) => {
       const elapsed = (now - started) / 1000;
-      applyLamp(Math.min(1.1, elapsed));
+      state.lampLevel = fromLevel + (1 - fromLevel) * easeOutCubic(clamp(elapsed / 0.5, 0, 1));
+      state.lampFlare = elapsed < 0.16 ? smoothstep(elapsed / 0.16)
+        : elapsed < 0.28 ? 1
+        : Math.max(0, 1 - quintic((elapsed - 0.28) / 0.82));
+      applyLamp(state.lampLevel, state.lampFlare);
       if (elapsed < 1.1) {
         state.lampRaf = requestAnimationFrame(step);
-      } else {
-        state.lampRaf = 0;
-        applyLamp(1.1);
-        els.root.classList.remove('lt-animating');
+        return;
       }
+      state.lampRaf = 0;
+      state.lampLevel = 1;
+      state.lampFlare = 0;
+      applyLamp(1, 0);
+      els.root.classList.remove('lt-animating');
     };
     state.lampRaf = requestAnimationFrame(step);
   }
@@ -1110,7 +1160,7 @@
     if (els.brightness) els.brightness.value = String(Math.round(state.brightness * 100));
     // Restore the remembered lamp state as-is: the ignition animation and switch
     // sound belong to actually pressing the lamp, not to re-entering a lit table.
-    applyLamp(state.lampOn ? 1.1 : -1);
+    resetLampOutput();
     syncLamp();
     if (els.hint) els.hint.textContent = t('web.lighttable.hint');
     positionHint();
@@ -1279,7 +1329,7 @@
   /* ----------------------------------------------------------------- loupe */
 
   function closeLensSize() {
-    return Math.max(NORMAL_LENS, Math.min(innerWidth, innerHeight) * 0.94);
+    return Math.max(NORMAL_LENS, Math.min(innerWidth, innerHeight) * 0.66);
   }
 
   function closeFieldTarget() {
@@ -1312,52 +1362,27 @@
   let lensVisible = false;
   let lensHiding = false;
   let lensHideTimer = 0;
+  let lensFinishTimer = 0;
 
   function cancelLensHide() {
     clearTimeout(lensHideTimer);
     lensHideTimer = 0;
   }
 
-  function currentLensLook(canvas) {
-    const style = getComputedStyle(canvas);
-    const opacity = Number(style.opacity);
-    let scale = 1;
-    const matrix = /matrix\(([^)]+)\)/.exec(style.transform);
-    if (matrix) {
-      const first = Number(matrix[1].split(',')[0]);
-      if (Number.isFinite(first) && first > 0) scale = first;
-    }
-    return {
-      opacity: Number.isFinite(opacity) ? clamp(opacity, 0, 1) : 1,
-      scale
-    };
-  }
-
   function showLens() {
     if (!els || !els.loupe) return;
     cancelLensHide();
+    clearTimeout(lensFinishTimer);
+    lensFinishTimer = 0;
     if (lensVisible) return;
     const canvas = els.loupe;
-    const resuming = lensHiding;
-    const look = resuming ? currentLensLook(canvas) : { opacity: 0, scale: 0.86 };
     lensVisible = true;
     lensHiding = false;
     canvas.hidden = false;
-    if (reduceMotion() || typeof canvas.animate !== 'function') {
-      canvas.style.opacity = '';
-      canvas.style.transform = '';
-      return;
-    }
-    if (typeof canvas.getAnimations === 'function') {
-      for (const animation of canvas.getAnimations()) animation.cancel();
-    }
-    try {
-      canvas.animate(
-        [{ opacity: look.opacity, transform: 'scale(' + look.scale + ')' },
-         { opacity: 1, transform: 'scale(1)' }],
-        { duration: 190, easing: 'cubic-bezier(.2, .85, .25, 1)' }
-      );
-    } catch (error) { /* animation is cosmetic */ }
+    // Commit the unhidden state first so the first appearance transitions too
+    // (WebKit otherwise can show it instantly).
+    void canvas.offsetWidth;
+    canvas.classList.add('is-visible');
   }
 
   function concealLens() {
@@ -1368,38 +1393,19 @@
       if (!lensHiding) canvas.hidden = true;
       return;
     }
-    const look = currentLensLook(canvas);
     lensVisible = false;
     lensHiding = true;
-    if (reduceMotion() || typeof canvas.animate !== 'function') {
+    canvas.classList.remove('is-visible');
+    lensFinishTimer = setTimeout(() => {
+      lensFinishTimer = 0;
       lensHiding = false;
-      canvas.hidden = true;
-      canvas.style.opacity = '';
-      canvas.style.transform = '';
-      return;
-    }
-    if (typeof canvas.getAnimations === 'function') {
-      for (const animation of canvas.getAnimations()) animation.cancel();
-    }
-    try {
-      const fade = canvas.animate(
-        [{ opacity: look.opacity, transform: 'scale(' + look.scale + ')' },
-         { opacity: 0, transform: 'scale(0.9)' }],
-        { duration: 150, easing: 'ease-in' }
-      );
-      fade.onfinish = () => {
-        lensHiding = false;
-        if (!lensVisible) canvas.hidden = true;
-      };
-      fade.oncancel = () => { lensHiding = false; };
-    } catch (error) {
-      lensHiding = false;
-      canvas.hidden = true;
-    }
+      if (!lensVisible) canvas.hidden = true;
+    }, reduceMotion() ? 0 : 200);
   }
 
   function hideLens() {
     if (els) els.root.classList.remove('lt-no-cursor');
+    setFocusDim(false);
     concealLens();
   }
 
@@ -1412,6 +1418,75 @@
       lensHideTimer = 0;
       hideLens();
     }, 120);
+  }
+
+  let focusRaf = 0;
+  let focusStart = 0;
+  let focusFrom = 0;
+  let focusRadius = 0;
+  let focusOut = false;
+
+  function focusReach() {
+    const point = state.pointer || { x: innerWidth / 2, y: innerHeight / 2 };
+    return Math.hypot(Math.max(point.x, innerWidth - point.x), Math.max(point.y, innerHeight - point.y));
+  }
+
+  // The dim sweeps in from the far corners toward the glass and, on release,
+  // retracts along the same path instead of simply fading out.
+  function stepFocusSweep(now) {
+    const duration = focusOut ? 620 : 700;
+    const progress = clamp((now - focusStart) / duration, 0, 1);
+    const target = focusOut ? focusReach() * 0.98 : state.lensD / 2 + 2;
+    focusRadius = focusFrom + (target - focusFrom) * easeInOut(progress);
+    if (els && els.focus) els.focus.style.setProperty('--lt-focus-r', focusRadius + 'px');
+    if (progress < 1) {
+      focusRaf = requestAnimationFrame(stepFocusSweep);
+      return;
+    }
+    focusRaf = 0;
+    if (focusOut) {
+      focusOut = false;
+      if (els && els.focus) els.focus.classList.remove('is-on');
+    }
+  }
+
+  function beginFocusSweep(out) {
+    cancelAnimationFrame(focusRaf);
+    focusOut = out;
+    focusFrom = focusRadius;
+    focusStart = performance.now();
+    focusRaf = requestAnimationFrame(stepFocusSweep);
+  }
+
+  function setFocusDim(on) {
+    if (!els || !els.focus) return;
+    if (on) {
+      if (!els.focus.classList.contains('is-on')) {
+        els.focus.classList.add('is-on');
+        els.root.classList.add('lt-focusing');
+        focusRadius = focusReach() * 0.98;
+        beginFocusSweep(false);
+      } else if (focusOut) {
+        // Pressed again while retracting: carry on inward from here.
+        beginFocusSweep(false);
+      }
+      return;
+    }
+    if (!els.focus.classList.contains('is-on') || focusOut) return;
+    els.root.classList.remove('lt-focusing');
+    beginFocusSweep(true);
+  }
+
+  function positionFocusDim(x, y, diameter) {
+    if (!els || !els.focus) return;
+    if (!state.open || !state.loupe || !state.closeUp) {
+      setFocusDim(false);
+      return;
+    }
+    els.focus.style.setProperty('--lt-focus-x', x + 'px');
+    els.focus.style.setProperty('--lt-focus-y', y + 'px');
+    setFocusDim(true);
+    if (!focusRaf) els.focus.style.setProperty('--lt-focus-r', (diameter / 2 + 2) + 'px');
   }
 
   function positionLoupe() {
@@ -1428,6 +1503,11 @@
     els.loupe.style.height = diameter + 'px';
     els.loupe.style.left = (x - diameter / 2) + 'px';
     els.loupe.style.top = (y - diameter / 2) + 'px';
+    // Unfold from the cursor, not from the glass centre: the scale origin is
+    // the pointer's position inside the canvas box.
+    els.loupe.style.setProperty('--lt-origin-x', (state.pointer.x - (x - diameter / 2)) + 'px');
+    els.loupe.style.setProperty('--lt-origin-y', (state.pointer.y - (y - diameter / 2)) + 'px');
+    positionFocusDim(x, y, diameter);
   }
 
   // Lens diameter and sampled field travel on one timeline, so pushing in is a
@@ -1639,30 +1719,78 @@
     // The lens sees the lit board around the photo, not a black void.
     const panel = Number.parseFloat(getComputedStyle(els.root).getPropertyValue('--lt-panel')) || 0.9;
     const boardLevel = clamp(panel, 0, 1);
-    ctx.fillStyle = 'rgb(' + Math.round(255 * boardLevel) + ',' + Math.round(248 * boardLevel) + ',' + Math.round(235 * boardLevel) + ')';
-    ctx.fillRect(0, 0, size, size);
+    const boardColor = 'rgb(' + Math.round(255 * boardLevel) + ',' + Math.round(248 * boardLevel) + ',' + Math.round(235 * boardLevel) + ')';
+
+    // Render the field once into a lens-sized buffer; the rim rings then
+    // sample that buffer instead of rescaling the full photo on every ring.
+    const fieldNeed = Math.ceil(radius * 2 * 1.18);
+    const fieldSize = Math.min(2048, fieldNeed);
+    const offRatio = fieldSize / fieldNeed;
+    if (!fieldCanvas) {
+      fieldCanvas = document.createElement('canvas');
+      fieldCtx = fieldCanvas.getContext('2d');
+    }
+    if (fieldCanvas.width !== fieldSize || fieldCanvas.height !== fieldSize) {
+      fieldCanvas.width = fieldSize;
+      fieldCanvas.height = fieldSize;
+    }
+    const fieldCenter = fieldSize / 2;
+    fieldCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fieldCtx.fillStyle = boardColor;
+    fieldCtx.fillRect(0, 0, fieldSize, fieldSize);
+    fieldCtx.imageSmoothingEnabled = true;
+    fieldCtx.imageSmoothingQuality = 'high';
+    fieldCtx.save();
+    fieldCtx.translate(fieldCenter, fieldCenter);
+    fieldCtx.scale(backingPerImage * offRatio, backingPerImage * offRatio);
+    fieldCtx.translate(-sourceX, -sourceY);
+    fieldCtx.drawImage(source, 0, 0);
+    fieldCtx.restore();
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
+    const baseScale = 1 / offRatio;
     ctx.save();
     ctx.translate(radius, radius);
-    ctx.scale(backingPerImage, backingPerImage);
-    ctx.translate(-sourceX, -sourceY);
-    ctx.drawImage(source, 0, 0);
+    ctx.scale(baseScale, baseScale);
+    ctx.translate(-fieldCenter, -fieldCenter);
+    ctx.drawImage(fieldCanvas, 0, 0);
     ctx.restore();
 
-    // Slight refraction at the rim: redraw the field a touch larger under a ring mask.
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(radius, radius, radius - 1, 0, Math.PI * 2);
-    ctx.arc(radius, radius, radius * 0.93, 0, Math.PI * 2, true);
-    ctx.clip('evenodd');
-    ctx.globalAlpha = 0.12;
-    ctx.translate(radius, radius);
-    ctx.scale(backingPerImage * 1.008, backingPerImage * 1.008);
-    ctx.translate(-sourceX, -sourceY);
-    ctx.drawImage(source, 0, 0);
-    ctx.restore();
+    // Rim refraction: sample the outer band ring by ring along the radial
+    // curve, so content compresses slightly toward the edge.
+    const bandInner = radius * RIM_BAND;
+    const bandWidth = radius - bandInner;
+    const ringCount = Math.round(clamp(bandWidth / 2.5, 12, 48));
+    // Rings thin out toward the rim, where the curve bends hardest.
+    const ringEdge = (i) => bandInner + bandWidth * Math.pow(i / ringCount, 0.6);
+    const seam = 1;
+    for (let i = 0; i < ringCount; i += 1) {
+      const r0 = ringEdge(i);
+      const r1 = i === ringCount - 1 ? radius : ringEdge(i + 1);
+      const ringScale = 1 / (rimSampleScale(((r0 + r1) / 2) / radius) * offRatio);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(radius, radius, r1 + seam, 0, Math.PI * 2);
+      ctx.arc(radius, radius, r0 - seam, 0, Math.PI * 2, true);
+      ctx.clip('evenodd');
+      ctx.translate(radius, radius);
+      ctx.scale(ringScale, ringScale);
+      ctx.translate(-fieldCenter, -fieldCenter);
+      ctx.drawImage(fieldCanvas, 0, 0);
+      ctx.restore();
+    }
+
+    // Chromatic dispersion: a warm fringe hugging the rim with a cool sliver
+    // just outside it.
+    const fringe = ctx.createRadialGradient(radius, radius, radius * 0.86, radius, radius, radius);
+    fringe.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    fringe.addColorStop(0.55, 'rgba(255, 178, 110, 0.06)');
+    fringe.addColorStop(0.80, 'rgba(255, 204, 146, 0.10)');
+    fringe.addColorStop(0.93, 'rgba(128, 198, 255, 0.07)');
+    fringe.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = fringe;
+    ctx.fillRect(0, 0, size, size);
 
     // A faint aiming dot replaces the hidden pointer inside the glass.
     ctx.beginPath();
@@ -1670,26 +1798,25 @@
     ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
     ctx.fill();
 
-    // Warm lamp light mixing into the glass.
-    const gloss = ctx.createLinearGradient(0, 0, size, size);
-    gloss.addColorStop(0, 'rgba(255, 250, 236, 0.42)');
-    gloss.addColorStop(0.30, 'rgba(255, 252, 244, 0.06)');
-    gloss.addColorStop(0.62, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = gloss;
-    ctx.fillRect(0, 0, size, size);
-
-    const rim = ctx.createRadialGradient(radius, radius, radius * 0.70, radius, radius, radius);
+    const rim = ctx.createRadialGradient(radius, radius, radius * 0.82, radius, radius, radius);
     rim.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    rim.addColorStop(0.80, 'rgba(0, 0, 0, 0)');
-    rim.addColorStop(0.94, 'rgba(0, 0, 0, 0.30)');
-    rim.addColorStop(1, 'rgba(0, 0, 0, 0.66)');
+    rim.addColorStop(0.72, 'rgba(0, 0, 0, 0)');
+    rim.addColorStop(0.92, 'rgba(0, 0, 0, 0.13)');
+    rim.addColorStop(1, 'rgba(0, 0, 0, 0.30)');
     ctx.fillStyle = rim;
     ctx.fillRect(0, 0, size, size);
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.lineWidth = Math.max(1, 1.4 * scaleFactor);
+    // Polished edge: a hairline of bounce light just inside the rim.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+    ctx.lineWidth = Math.max(1, 1.6 * scaleFactor);
     ctx.beginPath();
-    ctx.arc(radius, radius, radius - 1.2, 0, Math.PI * 2);
+    ctx.arc(radius, radius, radius - Math.max(1.5, 3.4 * scaleFactor), 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)';
+    ctx.lineWidth = Math.max(1, 1.2 * scaleFactor);
+    ctx.beginPath();
+    ctx.arc(radius, radius, radius - 1.2 * scaleFactor, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
@@ -1811,6 +1938,7 @@
       stage: document.getElementById('lt-stage'),
       empty: document.getElementById('lt-empty'),
       loupe: document.getElementById('lt-loupe'),
+      focus: document.getElementById('lt-focus'),
       mag: document.getElementById('lt-mag'),
       bar: root.querySelector('.lt-bar'),
       lamp: document.getElementById('lt-lamp'),
@@ -1864,7 +1992,7 @@
       state.brightness = clamp(Number(els.brightness.value) / 100, 0.2, 1.6);
       clearTimeout(brightnessTimer);
       brightnessTimer = setTimeout(() => saveSettings({ lighttable_brightness: state.brightness }), 300);
-      if (state.lampOn && !state.lampRaf) applyLamp(1.1);
+      if (state.lampOn && !state.lampRaf) applyLamp(state.lampLevel, state.lampFlare);
     });
     if (els.bar) els.bar.addEventListener('click', () => {
       const active = document.activeElement;
@@ -1881,7 +2009,7 @@
       cancelAnimationFrame(state.lampRaf);
       state.lampRaf = 0;
       els.root.classList.remove('lt-animating');
-      if (state.lampOn) applyLamp(1.1);
+      resetLampOutput();
       playTick();
     });
     if (els.loupeToggle) els.loupeToggle.addEventListener('click', toggleLoupe);

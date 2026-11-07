@@ -23,6 +23,7 @@
   "web.sidebar.resize-hint": "拖动调整侧边栏宽度，双击恢复默认",
   "web.toolbar.up": "上一级",
   "web.toolbar.library": "图库",
+  "web.toolbar.toggle-sidebar": "显示/隐藏侧栏",
   "web.search.filename": "搜索文件名",
   "web.toolbar.toggle-theme": "切换主题",
   "web.toolbar.rescan": "重新扫描",

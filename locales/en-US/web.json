@@ -23,6 +23,7 @@
   "web.sidebar.resize-hint": "Drag to resize the sidebar; double-click to reset",
   "web.toolbar.up": "Up",
   "web.toolbar.library": "Library",
+  "web.toolbar.toggle-sidebar": "Toggle sidebar",
   "web.search.filename": "Search file names",
   "web.toolbar.toggle-theme": "Toggle theme",
   "web.toolbar.rescan": "Rescan",

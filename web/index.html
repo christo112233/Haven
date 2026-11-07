@@ -28,9 +28,10 @@
   </aside>
   <main>
     <header class="toolbar glass pywebview-drag-region">
+      <button id="sidebar-toggle" class="icon-button glass" data-i18n-title="web.toolbar.toggle-sidebar" data-i18n-aria-label="web.toolbar.toggle-sidebar" title="Toggle sidebar" aria-label="Toggle sidebar" aria-pressed="false"><i data-lucide="panel-left-close"></i></button>
       <button id="up-folder" class="icon-button" data-i18n-title="web.toolbar.up" data-i18n-aria-label="web.toolbar.up" title="Up" aria-label="Up"><i data-lucide="arrow-up"></i></button>
-      <div id="breadcrumbs" class="breadcrumbs glass" data-i18n="web.toolbar.library">Library</div>
       <div class="search"><i data-lucide="search"></i><input id="search" type="search" data-i18n-placeholder="web.search.filename" data-i18n-aria-label="web.search.filename" placeholder="Search file names" aria-label="Search file names"></div>
+      <div class="size-control glass"><i data-lucide="grid-2x2"></i><input id="thumb-size" data-i18n-aria-label="web.view.thumbnail-size" aria-label="Thumbnail size" type="range" min="120" max="480" value="240" step="10"><i data-lucide="layout-grid"></i></div>
       <button id="start-session" class="session-button glass" data-i18n-title="web.session.start-title" data-i18n-aria-label="web.session.start-title" title="Start a new culling session" aria-label="Start a new culling session"><i data-lucide="wand-2"></i><span data-i18n="web.session.start">Start Culling</span></button>
       <button id="lighttable-open" class="session-button glass" data-i18n-title="web.lighttable.open-title" data-i18n-aria-label="web.lighttable.open-title" title="Open light table" aria-label="Open light table"><i data-lucide="lamp"></i><span data-i18n="web.lighttable.open">Light table</span><span id="lighttable-count" class="lt-entry-count" hidden>0</span></button>
       <button id="theme-button" class="icon-button" data-i18n-title="web.toolbar.toggle-theme" data-i18n-aria-label="web.toolbar.toggle-theme" title="Toggle theme" aria-label="Toggle theme"><i data-lucide="sun"></i></button>
@@ -46,10 +47,9 @@
       <button id="session-cancel" class="secondary" data-i18n="web.session.cancel">Cancel round</button>
     </div>
     <section class="view-heading">
-      <div class="pywebview-drag-region"><div id="folder-parent" class="eyebrow" data-i18n="web.view.photos-videos">Photos &amp; Videos</div><h1 id="folder-title">Haven</h1><div id="folder-summary" class="summary" data-i18n="web.view.no-folders">No folders added yet</div></div>
+      <div class="pywebview-drag-region"><h1 id="folder-title">Haven</h1><div id="breadcrumbs" class="breadcrumbs" data-i18n="web.toolbar.library">Library</div><div id="folder-summary" class="summary" data-i18n="web.view.no-folders">No folders added yet</div></div>
       <div class="view-controls">
         <label class="recursive"><input id="recursive" type="checkbox"><span data-i18n="web.view.include-subfolders">Include subfolders</span></label><label class="recursive"><input id="stack-toggle" type="checkbox"><span data-i18n="web.view.stack-bursts">Stack bursts</span></label>
-        <div class="size-control glass"><i data-lucide="grid-2x2"></i><input id="thumb-size" data-i18n-aria-label="web.view.thumbnail-size" aria-label="Thumbnail size" type="range" min="120" max="480" value="240" step="10"><i data-lucide="layout-grid"></i></div>
       </div>
     </section>
     <section class="filterbar">
@@ -93,6 +93,7 @@
     <div class="lt-board" aria-hidden="true"><div class="lt-board-glow"></div><div class="lt-ruler lt-ruler-top"></div><div class="lt-ruler lt-ruler-left"></div></div>
     <div id="lt-stage" role="list"></div>
     <div class="lt-vignette" aria-hidden="true"></div>
+    <div id="lt-focus" class="lt-focus" aria-hidden="true"></div>
     <div id="lt-empty" class="lt-empty" hidden>
       <div class="lt-empty-card">
         <i data-lucide="lamp" aria-hidden="true"></i>

@@ -106,10 +106,11 @@ function initSidebarResize() {
   handle.onpointerdown=event=>{
     if(event.button!==0)return;
     drag={id:event.pointerId,x:event.clientX,width:Number(handle.getAttribute('aria-valuenow'))};
+    document.body.classList.add('sidebar-resizing');
     handle.setPointerCapture(event.pointerId);handle.classList.add('is-resizing');event.preventDefault();event.stopPropagation();
   };
   handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+event.clientX-drag.x);};
-  const endDrag=event=>{if(drag?.id!==event.pointerId)return;drag=null;handle.classList.remove('is-resizing');save();};
+  const endDrag=event=>{if(drag?.id!==event.pointerId)return;drag=null;handle.classList.remove('is-resizing');document.body.classList.remove('sidebar-resizing');save();};
   handle.onpointerup=handle.onpointercancel=endDrag;
   handle.ondblclick=()=>{preferred=null;apply();save();};
   handle.onkeydown=event=>{
@@ -290,7 +291,14 @@ function theme(setting) {
 }
 systemTheme.addEventListener('change', () => { if (state.themeSetting === 'system') theme('system'); });
 function applySidebarVisibility() {
-  document.body.classList.toggle('sidebar-hidden', Boolean(state.sidebarHidden));
+  const hidden = Boolean(state.sidebarHidden);
+  document.body.classList.toggle('sidebar-hidden', hidden);
+  const button = $('sidebar-toggle');
+  if (button) {
+    button.setAttribute('aria-pressed', String(hidden));
+    button.innerHTML = '<i data-lucide="' + (hidden ? 'panel-left-open' : 'panel-left-close') + '"></i>';
+    icons(button);
+  }
   syncMenuState();
 }
 function toggleSidebar() {
@@ -537,7 +545,7 @@ async function renderSmartAlbums() {
     const editLabel = escapeHTML(t('web.common.edit')), deleteLabel = escapeHTML(t('web.common.delete'));
     row.innerHTML = `<i data-lucide="sparkles"></i><span></span><small></small><span class="album-actions"><button class="icon-button album-edit" title="${editLabel}" aria-label="${editLabel}"><i data-lucide="pencil"></i></button><button class="icon-button album-delete" title="${deleteLabel}" aria-label="${deleteLabel}"><i data-lucide="trash-2"></i></button></span>`;
     row.querySelector('span').textContent = album.name;
-    row.onclick = () => safely(async () => { subfolderNavigation++; state.smartAlbum = album.id; state.folder = ''; state.epoch++; clearSubfolders(); document.querySelectorAll('.smart-album-row').forEach(node => node.classList.toggle('active', node === row)); const result = await api('open_smart_album', album.id); state.job = result.job; state.pages.clear(); state.total = 0; $('folder-title').textContent = album.name; $('folder-parent').textContent = t('web.sidebar.smart-albums'); $('folder-summary').textContent = t('web.view.reading'); $('viewport').classList.add('is-loading'); await poll(state.epoch); });
+    row.onclick = () => safely(async () => { subfolderNavigation++; state.smartAlbum = album.id; state.folder = ''; state.epoch++; clearSubfolders(); document.querySelectorAll('.smart-album-row').forEach(node => node.classList.toggle('active', node === row)); const result = await api('open_smart_album', album.id); state.job = result.job; state.pages.clear(); state.total = 0; $('folder-title').textContent = album.name; $('breadcrumbs').textContent = t('web.sidebar.smart-albums'); $('folder-summary').textContent = t('web.view.reading'); $('viewport').classList.add('is-loading'); await poll(state.epoch); });
     row.querySelector('.album-edit').onclick = event => { event.stopPropagation(); editSmartAlbum(album); };
     row.querySelector('.album-delete').onclick = event => { event.stopPropagation(); safely(async () => { await api('delete_smart_album', album.id); if (state.smartAlbum === album.id) await restoreAfterSmartAlbumDelete(); await renderSmartAlbums(); }); };
     row.oncontextmenu = event => { event.preventDefault(); contextMenu(event, [['trash-2', t('web.smart-album.delete'), async () => { await api('delete_smart_album', album.id); if (state.smartAlbum === album.id) await restoreAfterSmartAlbumDelete(); await renderSmartAlbums(); }]]); };
@@ -673,7 +681,7 @@ async function openFolder(path,silent=false) {
   if(!silent){
   $('viewport').classList.add('is-loading');$('viewport').scrollTop=0;$('warning').hidden=true;
   if($('grid').children.length){$('empty').hidden=true;}else{$('empty').hidden=false;$('empty').querySelector('h2').textContent=t('web.view.scanning');$('empty-add').hidden=true;}
-  $('folder-title').textContent=basename(path);$('folder-parent').textContent=path;$('folder-summary').textContent=t('web.view.reading-local');
+  $('folder-title').textContent=basename(path);$('folder-summary').textContent=t('web.view.reading-local');
   const segments = path.split(/[\\/]/).filter(Boolean);$('breadcrumbs').replaceChildren();
   segments.forEach((name,index) => {if(index) {const arrow=document.createElement('i');arrow.dataset.lucide='chevron-right';$('breadcrumbs').append(arrow);}const button=document.createElement('button');button.textContent=name;button.title=name;button.onclick=()=>safely(()=>openFolder(segments.slice(0,index+1).join(pathSeparator())));$('breadcrumbs').append(button);}); icons($('breadcrumbs'));
   }
@@ -935,7 +943,7 @@ function positionMetadataFilter(){
 }
 function visibleGrid() {
   const viewport=$('viewport'),grid=$('grid');const width=grid.clientWidth;
-  const columns=Math.max(1,Math.floor((width+18)/(state.size+18))),tile=(width-(columns-1)*18)/columns,rowHeight=tile+85;
+  const columns=Math.max(1,Math.floor((width+16)/(state.size+16))),tile=(width-(columns-1)*16)/columns,rowHeight=tile+56;
   const start=Math.max(0,Math.floor(viewport.scrollTop/rowHeight)-2)*columns;
   const end=Math.min(state.total,(Math.ceil((viewport.scrollTop+viewport.clientHeight)/rowHeight)+3)*columns);
   return {width,columns,tile,rowHeight,start:Math.min(start,state.total),end};
@@ -963,7 +971,7 @@ async function renderGrid(force=true) {
     const latest=visibleGrid(),latestKey=gridKey(latest);
     if(latestKey!==key){scheduleRender(false);return;}
     const keep=new Set();
-    for(let index=layout.start;index<layout.end;index++){const item=itemAt(index);if(!item)continue;keep.add(item.path);const node=card(item,index);node.style.position='absolute';node.style.width=layout.tile+'px';node.style.left=(index%layout.columns)*(layout.tile+18)+'px';node.style.top=Math.floor(index/layout.columns)*layout.rowHeight+'px';if(node.parentNode!==grid)grid.append(node);}
+    for(let index=layout.start;index<layout.end;index++){const item=itemAt(index);if(!item)continue;keep.add(item.path);const node=card(item,index);node.style.position='absolute';node.style.width=layout.tile+'px';node.style.left=(index%layout.columns)*(layout.tile+16)+'px';node.style.top=Math.floor(index/layout.columns)*layout.rowHeight+'px';if(node.parentNode!==grid)grid.append(node);}
     for(const [path,node] of state.nodes||[]){if(!keep.has(path)){observer.unobserve(node.querySelector('.picture img'));node.remove();state.nodes.delete(path);}}
     // Keep memory bounded to the first page plus pages near the viewport.
     for(const page of state.pages.keys())if(page!==0&&(page<Math.floor(layout.start/200)-1||page>Math.floor(layout.end/200)+1))state.pages.delete(page);
@@ -1420,6 +1428,7 @@ async function init(){
   document.querySelectorAll('[data-bulk]').forEach(button=>button.onclick=()=>safely(async()=>{const paths=selectedPaths();if(!paths.length)return;const action=button.dataset.bulk;if(action==='tag-add')await promptTags(paths);else if(action==='rating')await promptRating(paths);else if(action==='color')await promptColor(paths);else if(['favorite','flagged','rejected'].includes(action))await toggleMetadata(paths,action);else if(action==='round')await addRoundPicks(paths);else if(action==='lighttable'&&window.HavenLT)await window.HavenLT.add(paths);}));
   $('sort').onchange=event=>{state.sort=event.target.value;safely(reloadFilter);};$('sort-direction').onclick=()=>{state.descending=!state.descending;$('sort-direction').style.transform=state.descending?'rotate(180deg)':'';safely(reloadFilter);};
   $('thumb-size').oninput=event=>{state.size=Number(event.target.value);document.documentElement.style.setProperty('--tile',state.size+'px');scheduleRender();};$('thumb-size').onchange=()=>safely(()=>api('settings',{thumb_size:state.size}));
+  $('sidebar-toggle').onclick=()=>safely(toggleSidebar);
   $('recursive').onchange=()=>{if(state.folder)safely(()=>openFolder(state.folder));};$('stack-toggle').onchange=event=>{state.stack=event.target.checked;if(state.stack){state.sort='date';state.descending=false;$('sort').value='date';syncSelect('sort');}safely(async()=>{await api('settings',{stack:state.stack});await reloadFilter();});};$('stack-base-gap').onchange=event=>safely(()=>api('settings',{stack_base_gap:Number(event.target.value)}));$('stack-factor').onchange=event=>safely(()=>api('settings',{stack_factor:Number(event.target.value)}));$('viewport').onscroll=()=>scheduleRender(false);new ResizeObserver(()=>scheduleRender()).observe($('viewport'));
   $('viewer-close').onclick=closeViewer;$('viewer').oncancel=event=>{event.preventDefault();closeViewer();};$('stack-dialog-close').onclick=()=>collectStackDialog();$('stack-dialog').oncancel=event=>{event.preventDefault();collectStackDialog();};
   // The stack panel only renders the cards near its scroll position.

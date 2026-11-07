@@ -23,6 +23,7 @@
   "web.sidebar.resize-hint": "ドラッグでサイドバーの幅を変更、ダブルクリックでリセット",
   "web.toolbar.up": "上へ",
   "web.toolbar.library": "ライブラリ",
+  "web.toolbar.toggle-sidebar": "サイドバーの表示/非表示",
   "web.search.filename": "ファイル名を検索",
   "web.toolbar.toggle-theme": "テーマを切り替え",
   "web.toolbar.rescan": "再スキャン",
